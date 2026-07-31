@@ -92,13 +92,19 @@ export default function SalaryScreen() {
             <Text style={[styles.slipValue, { color: colors.text }]}>{formatCurrency(slip.basic)}</Text>
           </View>
           <View style={styles.slipRow}>
-            <Text style={[styles.slipLabel, { color: colors.textSecondary }]}>Allowances</Text>
+            <Text style={[styles.slipLabel, { color: colors.textSecondary }]}>Bus fare + OT</Text>
             <Text style={[styles.slipValue, { color: colors.success }]}>+{formatCurrency(slip.allowances)}</Text>
           </View>
           <View style={styles.slipRow}>
             <Text style={[styles.slipLabel, { color: colors.textSecondary }]}>Deductions</Text>
             <Text style={[styles.slipValue, { color: colors.danger }]}>-{formatCurrency(slip.deductions)}</Text>
           </View>
+          {slip.attendedHours != null ? (
+            <Text style={[styles.paymentDate, { color: colors.textSecondary }]}>
+              Attended {slip.attendedHours}h / {slip.scheduledHours ?? 0}h · Absent {slip.absentDays ?? 0} ·
+              Unpaid leave {slip.unpaidLeaveDays ?? 0} · OT {slip.otHours ?? 0}h
+            </Text>
+          ) : null}
           <View style={[styles.slipDivider, { backgroundColor: colors.border }]} />
           <View style={styles.slipRow}>
             <Text style={[styles.slipTotalLabel, { color: colors.text }]}>Net Pay</Text>

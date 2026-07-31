@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -8,20 +9,24 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Redirect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { ThisAILogo } from '@/components/ui/ThisAILogo';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
 import type { UserRole } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
+
+/** Matches Nalam Clinic banner maroon so status-bar area has no gaps. */
+const BANNER_MAROON = '#8B0018';
+/** Approx aspect ratio of the banner artwork (width / height). */
+const BANNER_ASPECT = 2.55;
 
 type AuthMode = 'signin' | 'register';
 
@@ -154,21 +159,26 @@ export default function LoginScreen() {
   };
 
   const isRegister = mode === 'register';
+  const { width: screenWidth } = useWindowDimensions();
+  const bannerBodyHeight = Math.max(120, Math.round(screenWidth / BANNER_ASPECT));
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <LinearGradient
-        colors={[colors.gradientStart, colors.gradientEnd]}
-        style={[styles.headerGradient, { paddingTop: insets.top + 20 }]}
-      >
-        <View style={styles.logoCard}>
-          <ThisAILogo compact />
-        </View>
-        <Text style={styles.tagline}>Employee & HR portal</Text>
-      </LinearGradient>
+      <View style={[styles.banner, { backgroundColor: BANNER_MAROON }]}>
+        <View style={{ height: insets.top, backgroundColor: BANNER_MAROON }} />
+        <Image
+          source={require('@/assets/images/nalam-clinic-logo.png')}
+          style={[styles.bannerImage, { width: screenWidth, height: bannerBodyHeight }]}
+          resizeMode="stretch"
+          accessibilityLabel="Nalam Clinic"
+        />
+      </View>
 
       <KeyboardAvoidingView style={styles.formArea} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <Text style={[styles.pageTagline, { color: colors.textSecondary }]}>
+            Clinic attendance, leave & payroll
+          </Text>
           <Card style={styles.form}>
             <Text style={[styles.formTitle, { color: colors.text }]}>
               {isRegister ? 'Create account' : 'Sign in'}
@@ -192,7 +202,7 @@ export default function LoginScreen() {
                     onPress={() => switchRole(item)}
                   >
                     <Text style={[styles.roleText, { color: role === item ? colors.primary : colors.textSecondary }]}>
-                      {item === 'employee' ? 'Employee' : 'Admin / HR'}
+                      {item === 'employee' ? 'Doctor / Staff' : 'Admin'}
                     </Text>
                   </Pressable>
                 ))}
@@ -355,22 +365,21 @@ function PasswordField({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  headerGradient: { paddingBottom: 28, alignItems: 'center', borderBottomLeftRadius: 32, borderBottomRightRadius: 32 },
-  logoCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    elevation: 4,
+  banner: {
+    width: '100%',
+    overflow: 'hidden',
   },
-  tagline: { color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 2, fontWeight: '500' },
-  formArea: { flex: 1, marginTop: -18 },
-  scroll: { paddingHorizontal: 24, paddingBottom: 40 },
+  bannerImage: {
+    width: '100%',
+  },
+  pageTagline: {
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  formArea: { flex: 1 },
+  scroll: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 40 },
   form: { padding: 24 },
   formTitle: { fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
   formSub: { fontSize: 14, marginTop: 4, marginBottom: 16, fontWeight: '500' },

@@ -1,7 +1,7 @@
-import { format, parseISO, differenceInMinutes } from 'date-fns';
+import { format } from 'date-fns';
 
 import { createTodayAttendance } from '@/data/mockData';
-import { getLeaveBalances as getBalances } from '@/services/employeeRegistry';
+import { getLeaveBalances as getBalances, findEmployeeById } from '@/services/employeeRegistry';
 import {
   loadAttendanceForEmployee,
   loadLeaveRequests,
@@ -10,14 +10,22 @@ import {
   saveAttendanceRecords,
   saveLeaveRequests,
 } from '@/services/firestoreRepository';
+import { loadShiftsForDate } from '@/services/shiftService';
 import { calculateLeaveDays, validateLeaveDateRange } from '@/utils/leaveValidation';
-import { getAvailableLeaveDays } from '@/utils/leaveBalances';
+import { resolveLeaveType, peopleOnLeaveForDate, normalizeLeaveType } from '@/utils/clinicLeave';
+import {
+  calcPunchHours,
+  calculateOtHours,
+  primaryShiftType,
+  scheduledHoursFromAssignments,
+} from '@/utils/shiftHours';
 import type {
   AttendanceRecord,
   LeaveBalance,
   LeaveRequest,
   LeaveType,
   PerformanceReview,
+  PersonOnLeave,
   PunchMethod,
   SalarySlip,
 } from '@/types/employee';
@@ -44,10 +52,11 @@ function nowTime(): string {
   return format(new Date(), 'HH:mm:ss');
 }
 
-function calcHours(punchIn: string, punchOut: string): number {
-  const start = parseISO(`2000-01-01T${punchIn}`);
-  const end = parseISO(`2000-01-01T${punchOut}`);
-  return Math.round((differenceInMinutes(end, start) / 60) * 10) / 10;
+function assertSameDayOnly(recordDate: string) {
+  const today = new Date().toISOString().split('T')[0];
+  if (recordDate !== today) {
+    throw new Error('Attendance can only be marked for today. Backdating is not allowed.');
+  }
 }
 
 export async function punchIn(
@@ -57,9 +66,14 @@ export async function punchIn(
 ): Promise<AttendanceRecord> {
   const records = await loadAttendance(employeeId);
   const today = records[0];
+  assertSameDayOnly(today.date);
   if (today.punchIn) {
     throw new Error('Already punched in today');
   }
+
+  const shifts = await loadShiftsForDate(today.date);
+  const myShifts = shifts.filter((s) => s.employeeId === employeeId);
+
   const updated: AttendanceRecord = {
     ...today,
     punchIn: nowTime(),
@@ -67,6 +81,9 @@ export async function punchIn(
     wifiSsid,
     status: method === 'wifi' ? 'present' : 'late',
     manualApprovalStatus: method === 'manual' ? 'pending' : undefined,
+    scheduledHours: scheduledHoursFromAssignments(myShifts),
+    shiftType: primaryShiftType(myShifts),
+    otHours: 0,
   };
   await saveAttendanceRecords([updated]);
   return updated;
@@ -75,18 +92,28 @@ export async function punchIn(
 export async function punchOut(employeeId: string, method: PunchMethod): Promise<AttendanceRecord> {
   const records = await loadAttendance(employeeId);
   const today = records[0];
+  assertSameDayOnly(today.date);
   if (!today.punchIn) {
     throw new Error('You must punch in first');
   }
   if (today.punchOut) {
     throw new Error('Already punched out today');
   }
+
   const punchOutTime = nowTime();
+  const shifts = await loadShiftsForDate(today.date);
+  const myShifts = shifts.filter((s) => s.employeeId === employeeId);
+  const hoursWorked = calcPunchHours(today.punchIn, punchOutTime);
+  const otHours = calculateOtHours(punchOutTime, myShifts);
+
   const updated: AttendanceRecord = {
     ...today,
     punchOut: punchOutTime,
     punchOutMethod: method,
-    hoursWorked: calcHours(today.punchIn, punchOutTime),
+    hoursWorked,
+    otHours,
+    scheduledHours: scheduledHoursFromAssignments(myShifts),
+    shiftType: primaryShiftType(myShifts),
     status: 'present',
   };
   await saveAttendanceRecords([updated]);
@@ -97,9 +124,13 @@ export async function getLeaveRequests(employeeId: string): Promise<LeaveRequest
   return loadLeaveRequests(employeeId);
 }
 
+/**
+ * Submit leave with date + reason. Type (paid/unpaid) is resolved automatically
+ * from remaining paid leave balance.
+ */
 export async function submitLeaveRequest(
   employeeId: string,
-  type: LeaveType,
+  _type: LeaveType | null,
   startDate: string,
   endDate: string,
   reason: string
@@ -117,15 +148,12 @@ export async function submitLeaveRequest(
   const days = calculateLeaveDays(startDate, endDate);
   const balances = await getBalances(employeeId);
   const existingRequests = await loadLeaveRequests(employeeId);
-  const available = getAvailableLeaveDays(balances, existingRequests, type);
-  if (days > available) {
-    throw new Error(`You only have ${available} day(s) of ${type} leave remaining.`);
-  }
+  const resolved = resolveLeaveType(balances, existingRequests, days);
 
   const request: LeaveRequest = {
     id: `lr-${Date.now()}`,
     employeeId,
-    type,
+    type: resolved.type,
     startDate,
     endDate,
     days,
@@ -137,6 +165,44 @@ export async function submitLeaveRequest(
   return request;
 }
 
+/** Admin inserts an already-approved leave day on behalf of a person. */
+export async function adminInsertLeave(params: {
+  employeeId: string;
+  date: string;
+  reason: string;
+  reviewedBy: string;
+}): Promise<LeaveRequest> {
+  const employee = await findEmployeeById(params.employeeId);
+  if (!employee) throw new Error('Person not found');
+
+  const balances = await getBalances(params.employeeId);
+  const existingRequests = await loadLeaveRequests(params.employeeId);
+  const resolved = resolveLeaveType(balances, existingRequests, 1);
+
+  const request: LeaveRequest = {
+    id: `lr-admin-${Date.now()}`,
+    employeeId: params.employeeId,
+    type: resolved.type,
+    startDate: params.date,
+    endDate: params.date,
+    days: 1,
+    reason: params.reason.trim() || 'Inserted by admin',
+    status: 'approved',
+    submittedAt: new Date().toISOString(),
+    reviewedAt: new Date().toISOString(),
+    reviewedBy: params.reviewedBy,
+    insertedByAdmin: true,
+  };
+  await saveLeaveRequests([request]);
+  return request;
+}
+
+export async function getPeopleOnLeaveToday(date?: string): Promise<PersonOnLeave[]> {
+  const day = date ?? new Date().toISOString().split('T')[0];
+  const all = await loadLeaveRequests();
+  return peopleOnLeaveForDate(day, all);
+}
+
 export async function getPerformanceReviews(employeeId: string): Promise<PerformanceReview[]> {
   return loadPerformanceReviews(employeeId);
 }
@@ -146,5 +212,9 @@ export async function getSalarySlips(employeeId: string): Promise<SalarySlip[]> 
 }
 
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(
+    amount
+  );
 }
+
+export { normalizeLeaveType };

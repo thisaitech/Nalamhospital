@@ -2,8 +2,8 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Development rules for thisAI HR app.
-    // Tighten these rules before production and move auth to Firebase Authentication.
+    // Clinic HR demo rules — open access for the custom email/password auth
+    // stored in Firestore (not Firebase Auth). Tighten before production.
     match /{document=**} {
       allow read, write: if true;
     }

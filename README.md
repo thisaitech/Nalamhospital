@@ -1,129 +1,50 @@
-# thisAI — Employee Mobile App
+# Hospital HRM — Clinic Payroll App
 
-A cross-platform mobile HR app built with **React Native** and **Expo** for employee self-service: attendance, leave, salary, and profile management.
+React Native / Expo app for clinic attendance, shift scheduling, leave, and salary for **Doctors** and **Staff**.
 
 ## Features
 
-- **Employee Profile** — View personal and work contact details
-- **Attendance (Punch In/Out)** — Track daily attendance with timestamps
-- **WiFi Punch-In** — Office WiFi verification before punch-in (validates connected SSID against approved office networks)
-- **Manual Punch Approval** — Manual punches queue for HR admin approval
-- **Leave Management** — View balances, submit requests, track approval status
-- **Salary & Payslips** — Monthly breakdown with basic, allowances, deductions, and net pay
-- **HR Admin** — Employee management, new hire onboarding, leave and attendance approvals
+- **Roles** — 2 Admin accounts (full access); Doctor / Staff self-service
+- **Attendance** — Same-day in/out only; scheduled vs attended hours; absent days; OT only after 1 hour past shift end
+- **Shifts** — Day / Night assignments with **per-person** start/end times; admin shift chart
+- **Leave** — Doctors: 2 paid days/cycle · Staff: 4 paid days/cycle; unpaid auto after quota; admin insert leave; who's on leave today
+- **Payroll** — Monthly fixed base salary − unpaid/absent deductions + OT pay + bus fare allowance
+- **WiFi punch** — Optional office WiFi verification (manual punch needs admin approval)
 
-## Tech Stack
+## Demo logins
 
-- React Native 0.85 + Expo SDK 56
-- Expo Router (file-based navigation)
-- TypeScript
-- Firebase Firestore for cloud data
-- AsyncStorage for session persistence
-- `@react-native-community/netinfo` + `expo-location` for WiFi verification
+| Role | Email | Password |
+|------|-------|----------|
+| Doctor | `dr.smith@clinic.com` | `password123` |
+| Staff | `nurse.patel@clinic.com` | `password123` |
+| Admin 1 | `admin1@clinic.com` | `admin123` |
+| Admin 2 | `admin2@clinic.com` | `admin123` |
 
-## Getting Started
+## Admin tabs
 
-### Prerequisites
+Dashboard · Attendance · Shifts · Leave · Payroll · Staff · Add
 
-- Node.js 18+
-- [Expo Go](https://expo.dev/go) on your phone, or Android Studio / Xcode for emulators
+## Doctor / Staff tabs
 
-### Install & Run
+Home (punch, shifts, who's on leave) · Attendance · Leave · Salary · Chat
+
+## Payroll assumptions
+
+- **Cycle:** monthly
+- **Doctors & staff:** fixed monthly base salary (not purely hourly)
+- **Per-day rate:** `baseSalary / 26`
+- **OT:** hours beyond shift end **+ 1 hour grace**, paid at hourly rate
+- **Bus fare:** admin-entered allowance added to payslip
+
+## Install & run
 
 ```bash
 npm install
 npm start
 ```
 
-Then scan the QR code with Expo Go, or press `a` for Android / `i` for iOS simulator.
+> On Windows, if `postinstall` fails on the bash CORS patch, dependencies are still installed; you can ignore that script or run under Git Bash.
 
-### Demo Login
+## Tech stack
 
-**Employee**
-
-| Email | Password |
-|-------|----------|
-| `john.doe@company.com` | `password123` |
-| `jane.smith@company.com` | `password123` |
-
-**Admin / HR**
-
-| Email | Password |
-|-------|----------|
-| `hr.admin@company.com` | `admin123` |
-
-## Android APK
-
-A release APK is available at [`releases/thisAI-v1.0.0.apk`](releases/thisAI-v1.0.0.apk) (arm64-v8a).
-
-Install on Android by enabling "Install unknown apps" for your file manager, then open the APK.
-
-**Package:** `com.thisaitech.hris`
-
-### Build APK locally
-
-Requirements: Java 21, Android SDK (API 36), NDK 27.1.12297006.
-
-```bash
-npm install
-npm run build:apk
-```
-
-The output is copied to `releases/thisAI-v1.0.0.apk`.
-
-For cloud builds with EAS:
-
-```bash
-npx eas-cli build --platform android --profile preview
-```
-
-## WiFi Punch-In
-
-The app verifies attendance on the **THISAI** office WiFi. Devices must be on the `192.168.100.x` network (for example `192.168.100.15`).
-
-Configure office settings in `constants/config.ts` and `utils/officeNetwork.ts`:
-
-```typescript
-export const ALLOWED_WIFI_SSIDS = ['THISAI'];
-export const OFFICE_IP_PREFIX = '192.168.100.';
-```
-
-**Verification checks:**
-1. Device is connected to WiFi
-2. SSID matches **THISAI**
-3. Device IP is in `192.168.100.x` (when IP can be detected)
-
-**Requirements for WiFi SSID detection:**
-- **Android**: Location permission + WiFi enabled
-- **iOS**: Location permission (required by Apple for SSID access)
-- **Web**: WiFi verification is not available; use manual punch or test on a device
-
-## Project Structure
-
-```
-app/                  # Screens (Expo Router)
-  (tabs)/             # Main tab navigation
-  admin/              # HR admin screens
-  login.tsx           # Authentication
-  leave-request.tsx   # Leave request modal
-components/ui/        # Reusable UI components
-contexts/             # React context (auth + data)
-services/             # Business logic & WiFi service
-data/                 # Mock employee data
-types/                # TypeScript interfaces
-constants/            # App config & theme
-```
-
-## Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm start` | Start Expo dev server |
-| `npm run android` | Run on Android |
-| `npm run ios` | Run on iOS |
-| `npm run web` | Run in browser |
-| `npm run build:apk` | Build Android release APK |
-
-## License
-
-Private — for internal use.
+Expo SDK 56 · React Native · TypeScript · Firebase Firestore · Expo Router

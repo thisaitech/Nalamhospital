@@ -1,13 +1,24 @@
 import {
+  DEFAULT_DAY_SHIFT,
+  DEFAULT_NIGHT_SHIFT,
+} from '@/constants/config';
+import {
   createNewHireRecords,
   loadEmployees as loadEmployeesFromFirestore,
   loadLeaveBalancesMap,
   loadUsers as loadUsersFromFirestore,
   saveEmployees as saveEmployeesToFirestore,
-  saveLeaveBalancesMap,
   saveUsers as saveUsersToFirestore,
 } from '@/services/firestoreRepository';
-import type { AppUser, Employee, EmployeeProfileUpdate, LeaveBalance, NewHireInput, RegisterInput } from '@/types/employee';
+import { defaultBalancesForCategory } from '@/utils/clinicLeave';
+import type {
+  AppUser,
+  Employee,
+  EmployeeProfileUpdate,
+  LeaveBalance,
+  NewHireInput,
+  RegisterInput,
+} from '@/types/employee';
 
 export async function loadEmployees(): Promise<Employee[]> {
   return loadEmployeesFromFirestore();
@@ -36,7 +47,8 @@ export async function findEmployeeById(employeeId: string): Promise<Employee | u
 }
 
 export function getEmployeeDisplayName(employee: Employee): string {
-  return `${employee.firstName} ${employee.lastName}`;
+  const prefix = employee.staffCategory === 'doctor' ? 'Dr. ' : '';
+  return `${prefix}${employee.firstName} ${employee.lastName}`;
 }
 
 export async function getLeaveBalances(employeeId: string): Promise<LeaveBalance[]> {
@@ -57,16 +69,18 @@ export async function createNewHire(input: NewHireInput): Promise<Employee> {
   const users = await loadUsers();
 
   const supervisor = employees.find((e) => e.employeeId === input.supervisorId);
-  if (!supervisor) {
-    throw new Error('Supervisor not found. Please select a supervisor.');
-  }
+  const managerName = supervisor ? getEmployeeDisplayName(supervisor) : 'Clinic Admin';
 
   const normalizedEmail = input.email.trim().toLowerCase();
   if (users.some((user) => user.email.toLowerCase() === normalizedEmail)) {
     throw new Error('An account with this email already exists.');
   }
 
+  const dayShiftEnabled = input.dayShiftEnabled || (!input.dayShiftEnabled && !input.nightShiftEnabled);
+  const nightShiftEnabled = input.nightShiftEnabled;
+  const password = input.tempPassword?.trim() || 'welcome123';
   const employeeId = nextEmployeeId(employees);
+  const staffCategory = input.staffCategory ?? 'staff';
   const employee: Employee = {
     id: String(Date.now()),
     employeeId,
@@ -74,28 +88,32 @@ export async function createNewHire(input: NewHireInput): Promise<Employee> {
     lastName: input.lastName.trim(),
     email: normalizedEmail,
     phone: input.phone.trim(),
-    department: input.department.trim(),
-    position: input.position.trim(),
-    manager: getEmployeeDisplayName(supervisor),
-    joinDate: input.joinDate,
+    department: input.department.trim() || 'General',
+    position: input.position.trim() || (staffCategory === 'doctor' ? 'Doctor' : 'Staff'),
+    manager: managerName,
+    joinDate: input.joinDate || new Date().toISOString().split('T')[0],
     address: input.address.trim(),
     emergencyContact: input.emergencyContact.trim(),
+    staffCategory,
+    baseSalary: Number(input.baseSalary) || 0,
+    busFare: Number(input.busFare) || 0,
+    dayShiftEnabled,
+    nightShiftEnabled,
+    dayShiftStart: input.dayShiftStart || DEFAULT_DAY_SHIFT.start,
+    dayShiftEnd: input.dayShiftEnd || DEFAULT_DAY_SHIFT.end,
+    nightShiftStart: input.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
+    nightShiftEnd: input.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
   };
 
   const user: AppUser = {
     email: employee.email,
-    password: input.tempPassword,
+    password,
     role: 'employee',
     employeeId,
     name: getEmployeeDisplayName(employee),
   };
 
-  const defaultBalances: LeaveBalance[] = [
-    { type: 'annual', total: 20, used: 0, remaining: 20 },
-    { type: 'sick', total: 10, used: 0, remaining: 10 },
-    { type: 'personal', total: 5, used: 0, remaining: 5 },
-    { type: 'unpaid', total: 0, used: 0, remaining: 0 },
-  ];
+  const defaultBalances = defaultBalancesForCategory(staffCategory);
 
   await createNewHireRecords(employee, user, defaultBalances);
   return employee;
@@ -113,26 +131,31 @@ export async function registerEmployee(input: RegisterInput): Promise<Employee> 
     throw new Error('Password must be at least 6 characters.');
   }
 
-  const employees = await loadEmployees();
   const supervisors = await getSupervisorOptions();
   const supervisor = supervisors[0];
-  if (!supervisor) {
-    throw new Error('Registration is unavailable right now. Please contact HR.');
-  }
-
   const today = new Date().toISOString().split('T')[0];
+
   return createNewHire({
     firstName,
     lastName,
     email: input.email,
     phone: input.phone?.trim() ?? '',
-    department: 'Engineering',
-    position: 'Software Engineer',
-    supervisorId: supervisor.employeeId,
+    department: 'Support',
+    position: 'Staff',
+    supervisorId: supervisor?.employeeId ?? '',
     address: '',
     emergencyContact: '',
     joinDate: today,
     tempPassword: password,
+    staffCategory: 'staff',
+    baseSalary: 25000,
+    busFare: 500,
+    dayShiftEnabled: true,
+    nightShiftEnabled: false,
+    dayShiftStart: DEFAULT_DAY_SHIFT.start,
+    dayShiftEnd: DEFAULT_DAY_SHIFT.end,
+    nightShiftStart: DEFAULT_NIGHT_SHIFT.start,
+    nightShiftEnd: DEFAULT_NIGHT_SHIFT.end,
   });
 }
 
@@ -168,6 +191,18 @@ export async function updateEmployeeProfile(
   return updated;
 }
 
+export async function updateEmployeePayrollFields(
+  employeeId: string,
+  fields: Partial<Pick<Employee, 'baseSalary' | 'busFare' | 'dayShiftEnabled' | 'nightShiftEnabled' | 'dayShiftStart' | 'dayShiftEnd' | 'nightShiftStart' | 'nightShiftEnd' | 'staffCategory'>>
+): Promise<Employee> {
+  const employees = await loadEmployees();
+  const employee = employees.find((e) => e.employeeId === employeeId);
+  if (!employee) throw new Error('Employee not found');
+  const updated = { ...employee, ...fields };
+  await saveEmployees([updated]);
+  return updated;
+}
+
 export async function assignSupervisor(employeeId: string, supervisorId: string): Promise<Employee> {
   const employees = await loadEmployees();
   const employee = employees.find((e) => e.employeeId === employeeId);
@@ -183,7 +218,7 @@ export async function assignSupervisor(employeeId: string, supervisorId: string)
 export async function getSupervisorOptions(): Promise<Employee[]> {
   const employees = await loadEmployees();
   const managers = employees.filter((employee) =>
-    /manager|supervisor|lead|director|head/i.test(employee.position)
+    /manager|supervisor|lead|director|head|consultant/i.test(employee.position)
   );
   const withReports = employees.filter((employee) =>
     employees.some(

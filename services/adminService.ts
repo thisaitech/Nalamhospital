@@ -7,11 +7,11 @@ import {
   saveLeaveBalancesMap,
   saveLeaveRequests,
 } from '@/services/firestoreRepository';
-import { computeLeaveBalances } from '@/utils/leaveBalances';
+import { adminInsertLeave } from '@/services/employeeService';
+import { normalizeLeaveType } from '@/utils/clinicLeave';
 import type {
   AttendanceRecord,
   Employee,
-  LeaveBalance,
   LeaveRequest,
   LeaveStatus,
 } from '@/types/employee';
@@ -29,10 +29,21 @@ async function syncLeaveBalancesForEmployee(employeeId: string): Promise<void> {
   const balances = map[employeeId];
   if (!balances?.length) return;
 
-  const synced = computeLeaveBalances(balances, requests).map((balance) => {
+  const synced = balances.map((balance) => {
+    const bucket = balance.type === 'paid' || balance.type === 'annual' ? 'paid' : balance.type === 'unpaid' ? 'unpaid' : balance.type;
     const approvedDays = requests
-      .filter((request) => request.type === balance.type && request.status === 'approved')
+      .filter((request) => {
+        const normalized = normalizeLeaveType(request.type);
+        if (bucket === 'paid') return normalized === 'paid' && request.status === 'approved';
+        if (bucket === 'unpaid') return normalized === 'unpaid' && request.status === 'approved';
+        return request.type === balance.type && request.status === 'approved';
+      })
       .reduce((sum, request) => sum + request.days, 0);
+
+    if (balance.type === 'unpaid') {
+      return { ...balance, used: approvedDays, remaining: 0, total: 0 };
+    }
+
     return {
       ...balance,
       used: approvedDays,
@@ -43,20 +54,12 @@ async function syncLeaveBalancesForEmployee(employeeId: string): Promise<void> {
   await saveLeaveBalancesMap({ [employeeId]: synced });
 }
 
-function countSupervisors(employees: Employee[]): number {
-  const withDirectReports = employees.filter((employee) =>
-    employees.some(
-      (other) =>
-        other.employeeId !== employee.employeeId &&
-        other.manager === getEmployeeDisplayName(employee)
-    )
-  ).length;
+function countDoctors(employees: Employee[]): number {
+  return employees.filter((e) => e.staffCategory === 'doctor').length;
+}
 
-  if (withDirectReports > 0) {
-    return withDirectReports;
-  }
-
-  return employees.filter((employee) => /manager|supervisor|lead/i.test(employee.position)).length;
+function countStaff(employees: Employee[]): number {
+  return employees.filter((e) => e.staffCategory !== 'doctor').length;
 }
 
 export async function getAllLeaveRequests(): Promise<LeaveRequest[]> {
@@ -104,6 +107,17 @@ export async function reviewLeaveRequest(
   return updated;
 }
 
+export async function insertLeaveForEmployee(params: {
+  employeeId: string;
+  date: string;
+  reason: string;
+  reviewedBy: string;
+}): Promise<LeaveRequest> {
+  const request = await adminInsertLeave(params);
+  await syncLeaveBalancesForEmployee(params.employeeId);
+  return request;
+}
+
 export async function reviewAttendanceApproval(
   recordId: string,
   approved: boolean,
@@ -137,9 +151,9 @@ export async function getAdminStats() {
   ]);
   return {
     totalEmployees: employees.length,
-    totalSupervisors: countSupervisors(employees),
+    totalSupervisors: countDoctors(employees),
     pendingApprovals: pendingLeave.length + pendingAttendance.length,
-    departments: [...new Set(employees.map((e) => e.department))].length,
+    departments: countStaff(employees),
   };
 }
 
@@ -147,9 +161,10 @@ export async function enrichLeaveRequest(request: LeaveRequest) {
   const employee = await findEmployeeById(request.employeeId);
   return {
     ...request,
-    employeeName: employee ? `${employee.firstName} ${employee.lastName}` : request.employeeId,
+    employeeName: employee ? getEmployeeDisplayName(employee) : request.employeeId,
     department: employee?.department ?? '—',
     supervisor: employee?.manager ?? '—',
+    staffCategory: employee?.staffCategory ?? 'staff',
   };
 }
 

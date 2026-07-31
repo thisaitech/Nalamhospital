@@ -6,12 +6,15 @@ import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState } from 'react';
 
+import { Link } from 'expo-router';
+
+import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ProfileHeader } from '@/components/ui/ProfileHeader';
 import { SectionHeader } from '@/components/ui/QuickAction';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useApp } from '@/contexts/AppContext';
-import { APP_NAME } from '@/constants/config';
+import { APP_NAME, LEAVE_TYPE_LABELS } from '@/constants/config';
 import Colors from '@/constants/Colors';
 import { verifyOfficeWifi } from '@/services/wifiService';
 import { formatDisplayTime } from '@/utils/formatTime';
@@ -26,7 +29,7 @@ function showPunchAlert(title: string, message: string) {
 }
 
 export default function DashboardScreen() {
-  const { employee, attendance, logout, doPunchIn, doPunchOut } = useApp();
+  const { employee, attendance, logout, doPunchIn, doPunchOut, peopleOnLeaveToday, upcomingShifts } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const insets = useSafeAreaInsets();
@@ -185,6 +188,49 @@ export default function DashboardScreen() {
         </LinearGradient>
       </Card>
 
+      <View style={styles.quickLinks}>
+        <Link href="/leave-request" asChild>
+          <Button title="Request leave" variant="outline" style={styles.quickBtn} />
+        </Link>
+        <Link href="/(tabs)/attendance" asChild>
+          <Button title="My attendance" variant="outline" style={styles.quickBtn} />
+        </Link>
+      </View>
+
+      <SectionHeader title="Upcoming shifts" />
+      {upcomingShifts.length === 0 ? (
+        <Card style={styles.historyCard}>
+          <Text style={[styles.historyDetail, { color: colors.textSecondary }]}>No upcoming shifts assigned.</Text>
+        </Card>
+      ) : (
+        upcomingShifts.slice(0, 3).map((shift) => (
+          <Card key={shift.id} style={styles.historyCard}>
+            <Text style={[styles.historyDate, { color: colors.text }]}>
+              {format(parseISO(shift.date), 'EEE, MMM d')} · {shift.shiftType.toUpperCase()}
+            </Text>
+            <Text style={[styles.historyDetail, { color: colors.textSecondary }]}>
+              {shift.startTime} – {shift.endTime}
+            </Text>
+          </Card>
+        ))
+      )}
+
+      <SectionHeader title="Who's on leave today" />
+      {peopleOnLeaveToday.length === 0 ? (
+        <Card style={styles.historyCard}>
+          <Text style={[styles.historyDetail, { color: colors.textSecondary }]}>Everyone is available today.</Text>
+        </Card>
+      ) : (
+        peopleOnLeaveToday.map((person) => (
+          <Card key={`${person.employeeId}-leave`} style={styles.historyCard}>
+            <Text style={[styles.historyDate, { color: colors.text }]}>{person.employeeName}</Text>
+            <Text style={[styles.historyDetail, { color: colors.textSecondary }]}>
+              {LEAVE_TYPE_LABELS[person.leaveType] ?? person.leaveType} · {person.department}
+            </Text>
+          </Card>
+        ))
+      )}
+
       <SectionHeader title="Recent activity" action={{ label: 'See all', href: '/(tabs)/attendance' }} />
       {attendance.slice(0, 4).map((record) => (
         <Card key={record.id} style={styles.historyCard}>
@@ -201,6 +247,7 @@ export default function DashboardScreen() {
                   ? `${formatDisplayTime(record.punchIn)} – ${formatDisplayTime(record.punchOut)}`
                   : 'No punch recorded'}
                 {record.hoursWorked > 0 ? ` · ${record.hoursWorked}h` : ''}
+                {record.otHours > 0 ? ` · OT ${record.otHours}h` : ''}
               </Text>
             </View>
             <StatusBadge
@@ -251,6 +298,8 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   heroBtnText: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
+  quickLinks: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  quickBtn: { flex: 1 },
   historyCard: { marginBottom: 10, paddingVertical: 14, paddingHorizontal: 14 },
   historyRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   dateIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },

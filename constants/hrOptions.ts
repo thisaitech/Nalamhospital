@@ -3,53 +3,76 @@ import { addDays, format, startOfDay } from 'date-fns';
 import type { SelectOption } from '@/constants/leaveOptions';
 
 export const DEPARTMENT_OPTIONS: SelectOption[] = [
-  { value: 'Engineering', label: 'Engineering' },
-  { value: 'Human Resources', label: 'Human Resources' },
-  { value: 'Finance', label: 'Finance' },
-  { value: 'Operations', label: 'Operations' },
-  { value: 'Sales', label: 'Sales' },
-  { value: 'Marketing', label: 'Marketing' },
+  { value: 'Medical', label: 'Medical' },
+  { value: 'Nursing', label: 'Nursing' },
+  { value: 'Administration', label: 'Administration' },
+  { value: 'Laboratory', label: 'Laboratory' },
+  { value: 'Pharmacy', label: 'Pharmacy' },
+  { value: 'Support', label: 'Support' },
 ];
 
 export const POSITIONS_BY_DEPARTMENT: Record<string, SelectOption[]> = {
-  Engineering: [
-    { value: 'Junior Software Engineer', label: 'Junior Software Engineer' },
-    { value: 'Software Engineer', label: 'Software Engineer' },
-    { value: 'Senior Software Engineer', label: 'Senior Software Engineer' },
-    { value: 'Engineering Manager', label: 'Engineering Manager' },
+  Medical: [
+    { value: 'General Physician', label: 'General Physician' },
+    { value: 'Specialist Doctor', label: 'Specialist Doctor' },
+    { value: 'Resident Doctor', label: 'Resident Doctor' },
+    { value: 'Consultant', label: 'Consultant' },
   ],
-  'Human Resources': [
+  Nursing: [
+    { value: 'Staff Nurse', label: 'Staff Nurse' },
+    { value: 'Senior Nurse', label: 'Senior Nurse' },
+    { value: 'Nursing Supervisor', label: 'Nursing Supervisor' },
+  ],
+  Administration: [
+    { value: 'Receptionist', label: 'Receptionist' },
     { value: 'HR Executive', label: 'HR Executive' },
-    { value: 'HR Manager', label: 'HR Manager' },
-    { value: 'Recruiter', label: 'Recruiter' },
+    { value: 'Admin Officer', label: 'Admin Officer' },
   ],
-  Finance: [
-    { value: 'Accountant', label: 'Accountant' },
-    { value: 'Financial Analyst', label: 'Financial Analyst' },
-    { value: 'Finance Manager', label: 'Finance Manager' },
+  Laboratory: [
+    { value: 'Lab Technician', label: 'Lab Technician' },
+    { value: 'Lab Supervisor', label: 'Lab Supervisor' },
   ],
-  Operations: [
-    { value: 'Operations Executive', label: 'Operations Executive' },
-    { value: 'Operations Manager', label: 'Operations Manager' },
+  Pharmacy: [
+    { value: 'Pharmacist', label: 'Pharmacist' },
+    { value: 'Pharmacy Assistant', label: 'Pharmacy Assistant' },
   ],
-  Sales: [
-    { value: 'Sales Executive', label: 'Sales Executive' },
-    { value: 'Sales Manager', label: 'Sales Manager' },
-  ],
-  Marketing: [
-    { value: 'Marketing Executive', label: 'Marketing Executive' },
-    { value: 'Marketing Manager', label: 'Marketing Manager' },
+  Support: [
+    { value: 'Attendant', label: 'Attendant' },
+    { value: 'Security', label: 'Security' },
+    { value: 'Housekeeping', label: 'Housekeeping' },
   ],
 };
 
-export function buildJoinDateOptions(): SelectOption[] {
+export const STAFF_CATEGORY_OPTIONS: SelectOption[] = [
+  { value: 'doctor', label: 'Doctor' },
+  { value: 'staff', label: 'Staff' },
+];
+
+export const SHIFT_TYPE_OPTIONS: SelectOption[] = [
+  { value: 'day', label: 'Day Shift' },
+  { value: 'night', label: 'Night Shift' },
+];
+
+export function buildJoinDateOptions(pastDays = 3650, futureDays = 365): SelectOption[] {
   const today = startOfDay(new Date());
-  return Array.from({ length: 396 }, (_, index) => {
-    const date = addDays(today, index - 30);
+  const total = pastDays + futureDays + 1;
+  return Array.from({ length: total }, (_, index) => {
+    const date = addDays(today, index - pastDays);
     const value = format(date, 'yyyy-MM-dd');
     return {
       value,
       label: format(date, 'EEE, MMM d, yyyy'),
     };
   });
+}
+
+export function buildTimeOptions(stepMinutes = 30): SelectOption[] {
+  const options: SelectOption[] = [];
+  for (let minutes = 0; minutes < 24 * 60; minutes += stepMinutes) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    const value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    options.push({ value, label: value });
+  }
+  return options;
 }

@@ -85,12 +85,17 @@ export default function AdminEmployeesScreen() {
                 />
                 <View style={styles.info}>
                   <Text style={[styles.name, { color: colors.text }]}>{getEmployeeDisplayName(emp)}</Text>
-                  <Text style={[styles.position, { color: colors.textSecondary }]}>{emp.position}</Text>
+                  <Text style={[styles.position, { color: colors.textSecondary }]}>
+                    {emp.staffCategory === 'doctor' ? 'Doctor' : 'Staff'} · {emp.position}
+                  </Text>
                   <Text style={[styles.meta, { color: colors.textMuted }]}>
-                    {emp.employeeId} · {emp.email}
+                    {emp.employeeId} · {emp.department}
                   </Text>
                   <Text style={[styles.supervisor, { color: colors.primary }]}>
-                    Supervisor: {emp.manager}
+                    {(emp.dayShiftEnabled ? 'Day' : '') +
+                      (emp.dayShiftEnabled && emp.nightShiftEnabled ? ' + ' : '') +
+                      (emp.nightShiftEnabled ? 'Night' : '')}{' '}
+                    · Base ₹{emp.baseSalary?.toLocaleString?.() ?? emp.baseSalary} · Bus ₹{emp.busFare ?? 0}
                   </Text>
                 </View>
               </View>

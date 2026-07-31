@@ -15,16 +15,12 @@ import { Button } from '@/components/ui/Button';
 import { SelectField } from '@/components/ui/SelectField';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
-import { LEAVE_TYPE_LABELS } from '@/constants/config';
 import {
   buildLeaveDateOptions,
   getLeaveReasonLabel,
   LEAVE_REASON_OPTIONS,
 } from '@/constants/leaveOptions';
-import type { LeaveType } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
-
-const LEAVE_TYPES: LeaveType[] = ['annual', 'sick', 'personal', 'unpaid'];
 
 function showAlert(title: string, message: string, onOk?: () => void) {
   if (Platform.OS === 'web') {
@@ -37,67 +33,60 @@ function showAlert(title: string, message: string, onOk?: () => void) {
 
 export default function LeaveRequestModal() {
   const router = useRouter();
-  const { requestLeave, employee } = useApp();
+  const { requestLeave, employee, leaveBalances } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
 
-  const [type, setType] = useState<LeaveType>('annual');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [leaveDate, setLeaveDate] = useState('');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [touched, setTouched] = useState({ start: false, end: false, reason: false });
+  const [touched, setTouched] = useState({ date: false, reason: false });
 
   const dateOptions = useMemo(() => buildLeaveDateOptions(90), []);
 
-  const endDateOptions = useMemo(() => {
-    if (!startDate) return dateOptions;
-    return dateOptions.filter((option) => option.value >= startDate);
-  }, [dateOptions, startDate]);
+  const paidBalance = leaveBalances.find((b) => b.type === 'paid' || b.type === 'annual');
+  const paidRemaining = paidBalance?.remaining ?? 0;
 
-  const startError = touched.start && !startDate ? 'Start date is required' : undefined;
-  const endError = touched.end && !endDate ? 'End date is required' : undefined;
+  const dateError = touched.date && !leaveDate ? 'Date is required' : undefined;
   const reasonError = touched.reason && !reason ? 'Reason is required' : undefined;
-
-  const datesValid = Boolean(startDate && endDate && endDate >= startDate);
-  const formComplete = datesValid && Boolean(reason);
+  const formComplete = Boolean(leaveDate && reason);
 
   const leaveDays = useMemo(() => {
-    if (!datesValid) return 0;
-    const start = parseISO(startDate);
-    const end = parseISO(endDate);
-    return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-  }, [datesValid, startDate, endDate]);
-
-  const approverName = employee?.manager ?? 'Not assigned';
-
-  const handleStartDateChange = (value: string) => {
-    setStartDate(value);
-    setTouched((prev) => ({ ...prev, start: true }));
-    if (endDate && value && endDate < value) {
-      setEndDate('');
+    if (!leaveDate) return 0;
+    try {
+      parseISO(leaveDate);
+      return 1;
+    } catch {
+      return 0;
     }
-  };
+  }, [leaveDate]);
+
+  const autoTypeHint =
+    paidRemaining > 0
+      ? `Will be marked as Paid Leave (${paidRemaining} paid day(s) remaining)`
+      : 'Paid quota used up — will be marked as Unpaid Leave';
+
+  const approverName = employee?.manager ?? 'Clinic Admin';
 
   const handleSubmit = async () => {
-    setTouched({ start: true, end: true, reason: true });
+    setTouched({ date: true, reason: true });
 
-    if (!startDate || !endDate || !reason) {
-      showAlert('Please fix the form', 'Select start date, end date, and reason.');
+    if (!leaveDate || !reason) {
+      showAlert('Please fix the form', 'Select a date and reason.');
       return;
     }
 
     if (!employee) {
-      showAlert('Not signed in', 'Please log in as an employee to submit a leave request.');
+      showAlert('Not signed in', 'Please log in to submit a leave request.');
       return;
     }
 
     setSubmitting(true);
     try {
-      await requestLeave(type, startDate, endDate, getLeaveReasonLabel(reason));
+      await requestLeave(null, leaveDate, leaveDate, getLeaveReasonLabel(reason));
       showAlert(
         'Submitted',
-        `Your leave request has been sent to ${approverName} for approval.`,
+        `Your leave request has been sent to ${approverName} for approval.\n${autoTypeHint}`,
         () => router.back()
       );
     } catch (e) {
@@ -126,57 +115,32 @@ export default function LeaveRequestModal() {
           <Text style={[styles.approverLabel, { color: colors.primary }]}>Approver</Text>
           <Text style={[styles.approverName, { color: colors.text }]}>{approverName}</Text>
           <Text style={[styles.approverHint, { color: colors.textSecondary }]}>
-            Your request will be reviewed by this manager.
+            Just pick a date and reason — paid vs unpaid is decided automatically from your balance.
           </Text>
         </View>
 
-        <Text style={[styles.label, { color: colors.textSecondary }]}>Leave Type</Text>
-        <View style={styles.typeRow}>
-          {LEAVE_TYPES.map((t) => (
-            <Button
-              key={t}
-              title={LEAVE_TYPE_LABELS[t]}
-              variant={type === t ? 'primary' : 'outline'}
-              onPress={() => setType(t)}
-              style={styles.typeBtn}
-            />
-          ))}
+        <View style={[styles.balanceHint, { backgroundColor: colors.card, borderColor: colors.borderLight }]}>
+          <Text style={[styles.hintText, { color: colors.text }]}>{autoTypeHint}</Text>
+          {leaveDays > 0 ? (
+            <Text style={[styles.hintSub, { color: colors.textSecondary }]}>{leaveDays} day requested</Text>
+          ) : null}
         </View>
 
         <SelectField
-          label="Start Date"
-          value={startDate}
-          onChange={handleStartDateChange}
-          options={dateOptions}
-          placeholder="Select start date"
-          error={startError}
-          {...fieldColors}
-        />
-
-        <SelectField
-          label="End Date"
-          value={endDate}
+          label="Leave date"
+          value={leaveDate}
           onChange={(value) => {
-            setEndDate(value);
-            setTouched((prev) => ({ ...prev, end: true }));
+            setLeaveDate(value);
+            setTouched((prev) => ({ ...prev, date: true }));
           }}
-          options={endDateOptions}
-          placeholder={startDate ? 'Select end date' : 'Select start date first'}
-          error={endError}
-          disabled={!startDate}
+          options={dateOptions}
+          placeholder="Select date"
+          error={dateError}
           {...fieldColors}
         />
 
-        {datesValid ? (
-          <Text style={[styles.hint, { color: colors.primary }]}>
-            {leaveDays} day{leaveDays === 1 ? '' : 's'} requested
-          </Text>
-        ) : (
-          <Text style={[styles.hint, { color: colors.textMuted }]}>Select dates from the lists above</Text>
-        )}
-
         <SelectField
-          label="Reason"
+          label="Reason (optional categories)"
           value={reason}
           onChange={(value) => {
             setReason(value);
@@ -208,7 +172,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 14,
     padding: 14,
-    marginBottom: 4,
+    marginBottom: 12,
   },
   approverLabel: {
     fontSize: 12,
@@ -226,9 +190,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: '500',
   },
-  label: { fontSize: 13, fontWeight: '600', marginBottom: 8, marginTop: 16 },
-  typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  typeBtn: { flexGrow: 1, minWidth: '45%', paddingVertical: 10 },
-  hint: { fontSize: 12, marginTop: 8, fontWeight: '500' },
+  balanceHint: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+  },
+  hintText: { fontSize: 13, fontWeight: '600' },
+  hintSub: { fontSize: 12, marginTop: 4 },
   submit: { marginTop: 24, marginBottom: 10 },
 });

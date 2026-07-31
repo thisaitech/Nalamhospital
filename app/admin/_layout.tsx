@@ -12,15 +12,21 @@ type IoniconName = keyof typeof Ionicons.glyphMap;
 
 const ADMIN_TAB_ICONS: Record<string, { active: IoniconName; inactive: IoniconName }> = {
   index: { active: 'grid', inactive: 'grid-outline' },
-  employees: { active: 'people', inactive: 'people-outline' },
+  attendance: { active: 'time', inactive: 'time-outline' },
+  shifts: { active: 'calendar', inactive: 'calendar-outline' },
   approvals: { active: 'checkmark-done-circle', inactive: 'checkmark-done-circle-outline' },
+  payroll: { active: 'cash', inactive: 'cash-outline' },
+  employees: { active: 'people', inactive: 'people-outline' },
   'new-hire': { active: 'person-add', inactive: 'person-add-outline' },
 };
 
 const ADMIN_TAB_COLORS: Record<string, { active: string; inactive: string; bg: string }> = {
-  index: { active: '#4F46E5', inactive: '#6366F1', bg: '#EEF2FF' },
-  employees: { active: '#0891B2', inactive: '#0891B2', bg: '#ECFEFF' },
+  index: { active: '#0F766E', inactive: '#0D9488', bg: '#F0FDFA' },
+  attendance: { active: '#0369A1', inactive: '#0284C7', bg: '#F0F9FF' },
+  shifts: { active: '#B45309', inactive: '#D97706', bg: '#FFFBEB' },
   approvals: { active: '#059669', inactive: '#059669', bg: '#ECFDF5' },
+  payroll: { active: '#7C3AED', inactive: '#8B5CF6', bg: '#F5F3FF' },
+  employees: { active: '#0891B2', inactive: '#0891B2', bg: '#ECFEFF' },
   'new-hire': { active: '#DB2777', inactive: '#DB2777', bg: '#FDF2F8' },
 };
 
@@ -32,7 +38,7 @@ function AdminTabIcon({ routeName, focused }: { routeName: string; focused: bool
     <View style={[styles.iconWrap, { backgroundColor: focused ? `${palette.active}22` : palette.bg }]}>
       <Ionicons
         name={focused ? icons.active : icons.inactive}
-        size={20}
+        size={18}
         color={focused ? palette.active : palette.inactive}
       />
     </View>
@@ -73,9 +79,16 @@ export default function AdminLayout() {
   return (
     <>
       <View
-        style={[styles.topBar, { backgroundColor: colors.card, borderBottomColor: colors.borderLight, paddingTop: insets.top + 8 }]}
+        style={[
+          styles.topBar,
+          {
+            backgroundColor: colors.card,
+            borderBottomColor: colors.borderLight,
+            paddingTop: insets.top + 8,
+          },
+        ]}
       >
-        <Text style={[styles.topTitle, { color: colors.text }]}>HR Admin · {adminName}</Text>
+        <Text style={[styles.topTitle, { color: colors.text }]}>Hospital HR · {adminName}</Text>
         <Pressable onPress={handleLogout} hitSlop={8}>
           <Text style={[styles.signOut, { color: colors.danger }]}>Sign out</Text>
         </Pressable>
@@ -89,12 +102,22 @@ export default function AdminLayout() {
             height: Platform.OS === 'ios' ? 88 : 72,
           },
           headerShown: false,
+          tabBarLabelStyle: { fontSize: 10, fontWeight: '700' },
         }}
       >
         <Tabs.Screen name="index" options={adminTabOptions('index', 'Dashboard')} />
-        <Tabs.Screen name="employees" options={adminTabOptions('employees', 'Employees')} />
-        <Tabs.Screen name="approvals" options={adminTabOptions('approvals', 'Approvals')} />
-        <Tabs.Screen name="new-hire" options={adminTabOptions('new-hire', 'New Hire')} />
+        <Tabs.Screen name="attendance" options={adminTabOptions('attendance', 'Attendance')} />
+        <Tabs.Screen name="shifts" options={adminTabOptions('shifts', 'Shifts')} />
+        <Tabs.Screen name="approvals" options={adminTabOptions('approvals', 'Leave')} />
+        <Tabs.Screen name="payroll" options={adminTabOptions('payroll', 'Payroll')} />
+        <Tabs.Screen name="employees" options={adminTabOptions('employees', 'Staff')} />
+        <Tabs.Screen
+          name="new-hire"
+          options={{
+            href: null,
+            headerShown: false,
+          }}
+        />
       </Tabs>
     </>
   );
@@ -109,12 +132,12 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
   },
-  topTitle: { fontSize: 16, fontWeight: '800' },
+  topTitle: { fontSize: 15, fontWeight: '800' },
   signOut: { fontSize: 13, fontWeight: '700' },
   iconWrap: {
-    width: 32,
-    height: 28,
-    borderRadius: 10,
+    width: 30,
+    height: 26,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },

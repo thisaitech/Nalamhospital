@@ -1,26 +1,24 @@
 {
   "expo": {
-    "name": "thisAI",
-    "slug": "thisai",
-    "version": "1.0.0",
+    "name": "Nalam Clinic",
+    "slug": "nalam-clinic",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "employeehub",
+    "scheme": "nalamclinic",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "thisAI needs your location to verify you are connected to the office WiFi network for attendance punch-in.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "thisAI needs your location to verify office WiFi for attendance."
+        "NSLocationWhenInUseUsageDescription": "Nalam Clinic needs your location to verify you are connected to the office WiFi network for attendance punch-in.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Nalam Clinic needs your location to verify office WiFi for attendance."
       }
     },
     "android": {
       "package": "com.thisaitech.hris",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/images/android-icon-foreground.png"
       },
       "permissions": [
         "ACCESS_FINE_LOCATION",
@@ -43,19 +41,19 @@
         {
           "image": "./assets/images/splash-icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#FFFFFF"
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow thisAI to access your location to verify office WiFi for attendance punch-in."
+          "locationWhenInUsePermission": "Allow Nalam Clinic to access your location to verify office WiFi for attendance punch-in."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow thisAI to access your photos to set your profile picture."
+          "photosPermission": "Allow Nalam Clinic to access your photos to set your profile picture."
         }
       ],
       "@react-native-community/datetimepicker",

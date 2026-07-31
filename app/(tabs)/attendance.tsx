@@ -137,8 +137,34 @@ export default function AttendanceScreen() {
         {today?.hoursWorked ? (
           <Text style={[styles.hours, { color: colors.primary }]}>
             Hours worked: {today.hoursWorked}h
+            {today.otHours > 0 ? ` · OT (payable): ${today.otHours}h` : ''}
+            {today.scheduledHours > 0 ? ` · Scheduled: ${today.scheduledHours}h` : ''}
           </Text>
         ) : null}
+      </Card>
+
+      <Card style={styles.todayCard}>
+        <Text style={[styles.todayLabel, { color: colors.textSecondary }]}>This period (your records)</Text>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryValue, { color: colors.text }]}>
+              {Math.round(attendance.reduce((s, r) => s + (r.scheduledHours || 0), 0) * 10) / 10}h
+            </Text>
+            <Text style={[styles.punchLabel, { color: colors.textMuted }]}>Scheduled</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryValue, { color: '#0F766E' }]}>
+              {Math.round(attendance.reduce((s, r) => s + (r.hoursWorked || 0), 0) * 10) / 10}h
+            </Text>
+            <Text style={[styles.punchLabel, { color: colors.textMuted }]}>Attended</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryValue, { color: colors.danger }]}>
+              {attendance.filter((r) => !r.punchIn && r.status === 'absent').length}
+            </Text>
+            <Text style={[styles.punchLabel, { color: colors.textMuted }]}>Absent days</Text>
+          </View>
+        </View>
       </Card>
 
       <View style={styles.actions}>
@@ -190,6 +216,13 @@ export default function AttendanceScreen() {
               </Text>
             </View>
           </View>
+          {(record.hoursWorked > 0 || record.otHours > 0) && (
+            <Text style={[styles.punchLabel, { color: colors.textSecondary, marginTop: 8 }]}>
+              {record.hoursWorked}h worked
+              {record.otHours > 0 ? ` · OT ${record.otHours}h` : ''}
+              {record.shiftType ? ` · ${record.shiftType}` : ''}
+            </Text>
+          )}
         </Card>
       ))}
     </ScrollView>
@@ -214,6 +247,9 @@ const styles = StyleSheet.create({
   todayPunchTime: { fontSize: 28, fontWeight: '700' },
   divider: { width: 1, height: 60, marginHorizontal: 12 },
   hours: { textAlign: 'center', marginTop: 16, fontSize: 15, fontWeight: '600' },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  summaryItem: { flex: 1, alignItems: 'center' },
+  summaryValue: { fontSize: 18, fontWeight: '800' },
   actions: { gap: 10, marginBottom: 24 },
   manualBtn: { marginTop: 0 },
   doneText: { textAlign: 'center', fontSize: 14, padding: 16 },

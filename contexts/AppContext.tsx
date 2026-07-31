@@ -7,6 +7,7 @@ import {
   getAdminStats,
   getPendingAttendanceApprovals,
   getPendingLeaveApprovals,
+  insertLeaveForEmployee,
   reviewAttendanceApproval,
   reviewLeaveRequest,
 } from '@/services/adminService';
@@ -25,13 +26,22 @@ import {
 import {
   getLeaveBalances,
   getLeaveRequests,
+  getPeopleOnLeaveToday,
   getSalarySlips,
   loadAttendance,
   punchIn,
   punchOut,
   submitLeaveRequest,
 } from '@/services/employeeService';
-import { ensureFirestoreSeed } from '@/services/firestoreRepository';
+import { ensureFirestoreSeed, loadAllAttendance, loadLeaveRequests } from '@/services/firestoreRepository';
+import { generatePayrollForMonth, loadPayrollSlips } from '@/services/payrollService';
+import {
+  getUpcomingShifts,
+  loadShiftsForDate,
+  loadShiftsInRange,
+  removeShiftAssignment,
+  upsertShiftAssignment,
+} from '@/services/shiftService';
 import { getItem, removeItem, setItem, storageKeys } from '@/services/storage';
 import type { ChatCategory, ChatMessage } from '@/types/chat';
 import type {
@@ -42,11 +52,16 @@ import type {
   LeaveRequest,
   LeaveType,
   NewHireInput,
+  PersonOnLeave,
   PunchMethod,
   RegisterInput,
   SalarySlip,
+  ShiftAssignment,
+  ShiftType,
   UserRole,
 } from '@/types/employee';
+import { monthDateRange, summarizeAttendanceForPeriod } from '@/utils/attendanceSummary';
+import type { AttendanceSummary } from '@/types/employee';
 
 interface Session {
   role: UserRole;
@@ -59,6 +74,7 @@ export interface EnrichedLeaveRequest extends LeaveRequest {
   employeeName: string;
   department: string;
   supervisor: string;
+  staffCategory?: string;
 }
 
 export interface EnrichedAttendanceApproval extends AttendanceRecord {
@@ -82,6 +98,9 @@ interface AppContextValue {
   pendingApprovals: EnrichedLeaveRequest[];
   pendingAttendanceApprovals: EnrichedAttendanceApproval[];
   adminStats: { totalEmployees: number; totalSupervisors: number; pendingApprovals: number; departments: number };
+  peopleOnLeaveToday: PersonOnLeave[];
+  upcomingShifts: ShiftAssignment[];
+  todayShifts: ShiftAssignment[];
   login: (email: string, password: string, role: UserRole) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
   logout: () => Promise<void>;
@@ -89,7 +108,7 @@ interface AppContextValue {
   refreshData: () => Promise<void>;
   doPunchIn: (method: PunchMethod, wifiSsid?: string | null) => Promise<AttendanceRecord | null>;
   doPunchOut: (method: PunchMethod) => Promise<AttendanceRecord | null>;
-  requestLeave: (type: LeaveType, startDate: string, endDate: string, reason: string) => Promise<void>;
+  requestLeave: (type: LeaveType | null, startDate: string, endDate: string, reason: string) => Promise<void>;
   sendMessage: (text: string, category?: ChatCategory) => Promise<void>;
   createHire: (input: NewHireInput) => Promise<Employee>;
   updateSupervisor: (employeeId: string, supervisorId: string) => Promise<void>;
@@ -98,6 +117,13 @@ interface AppContextValue {
   approveAttendance: (recordId: string) => Promise<void>;
   rejectAttendance: (recordId: string) => Promise<void>;
   getSupervisors: () => Promise<Employee[]>;
+  insertLeave: (employeeId: string, date: string, reason: string) => Promise<void>;
+  assignShift: (employeeId: string, date: string, shiftType: ShiftType) => Promise<void>;
+  deleteShift: (shiftId: string) => Promise<void>;
+  loadShiftChart: (fromDate: string, toDate: string) => Promise<ShiftAssignment[]>;
+  getAttendanceSummaries: (year: number, monthIndex: number) => Promise<AttendanceSummary[]>;
+  generatePayroll: (year: number, monthIndex: number) => Promise<SalarySlip[]>;
+  loadAllPayroll: () => Promise<SalarySlip[]>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -114,15 +140,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<EnrichedLeaveRequest[]>([]);
   const [pendingAttendanceApprovals, setPendingAttendanceApprovals] = useState<EnrichedAttendanceApproval[]>([]);
-  const [adminStats, setAdminStats] = useState({ totalEmployees: 0, totalSupervisors: 0, pendingApprovals: 0, departments: 0 });
+  const [adminStats, setAdminStats] = useState({
+    totalEmployees: 0,
+    totalSupervisors: 0,
+    pendingApprovals: 0,
+    departments: 0,
+  });
+  const [peopleOnLeaveToday, setPeopleOnLeaveToday] = useState<PersonOnLeave[]>([]);
+  const [upcomingShifts, setUpcomingShifts] = useState<ShiftAssignment[]>([]);
+  const [todayShifts, setTodayShifts] = useState<ShiftAssignment[]>([]);
 
   const employeeId = employee?.employeeId ?? '';
   const role = session?.role ?? null;
   const isAdmin = role === 'admin';
 
   const refreshData = useCallback(async () => {
-    const messages = await loadChatMessages();
+    const today = new Date().toISOString().split('T')[0];
+    const [messages, onLeave, shiftsToday] = await Promise.all([
+      loadChatMessages(),
+      getPeopleOnLeaveToday(today),
+      loadShiftsForDate(today),
+    ]);
     setChatMessages(messages);
+    setPeopleOnLeaveToday(onLeave);
+    setTodayShifts(shiftsToday);
 
     if (session?.role === 'admin') {
       const [employees, pendingLeave, pendingAttendance, stats] = await Promise.all([
@@ -143,16 +184,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (employeeId) {
-      const [att, leaves, balances, slips] = await Promise.all([
+      const [att, leaves, balances, slips, upcoming] = await Promise.all([
         loadAttendance(employeeId),
         getLeaveRequests(employeeId),
         getLeaveBalances(employeeId),
         getSalarySlips(employeeId),
+        getUpcomingShifts(employeeId),
       ]);
       setAttendance(att);
       setLeaveRequests(leaves);
       setLeaveBalances(balances);
       setSalarySlips(slips);
+      setUpcomingShifts(upcoming);
     }
   }, [employeeId, session?.role]);
 
@@ -220,19 +263,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setEmployee(emp);
   }, []);
 
-  const register = useCallback(async (input: RegisterInput) => {
-    const emp = await registerEmployee(input);
-    const newSession: Session = {
-      role: 'employee',
-      email: emp.email,
-      employeeId: emp.employeeId,
-      name: getEmployeeDisplayName(emp),
-    };
-    await setItem(storageKeys.SESSION, newSession);
-    setSession(newSession);
-    setEmployee(emp);
-    await refreshData();
-  }, [refreshData]);
+  const register = useCallback(
+    async (input: RegisterInput) => {
+      const emp = await registerEmployee(input);
+      const newSession: Session = {
+        role: 'employee',
+        email: emp.email,
+        employeeId: emp.employeeId,
+        name: getEmployeeDisplayName(emp),
+      };
+      await setItem(storageKeys.SESSION, newSession);
+      setSession(newSession);
+      setEmployee(emp);
+      await refreshData();
+    },
+    [refreshData]
+  );
 
   const updateProfile = useCallback(
     async (input: EmployeeProfileUpdate) => {
@@ -257,6 +303,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAllEmployees([]);
     setPendingApprovals([]);
     setPendingAttendanceApprovals([]);
+    setPeopleOnLeaveToday([]);
+    setUpcomingShifts([]);
+    setTodayShifts([]);
     setAdminStats({ totalEmployees: 0, totalSupervisors: 0, pendingApprovals: 0, departments: 0 });
   }, []);
 
@@ -281,7 +330,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const requestLeave = useCallback(
-    async (type: LeaveType, startDate: string, endDate: string, reason: string) => {
+    async (type: LeaveType | null, startDate: string, endDate: string, reason: string) => {
       if (!employeeId) {
         throw new Error('You must be logged in as an employee to submit leave.');
       }
@@ -306,27 +355,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (isAdmin) {
-        const message = await sendChatMessage('ADMIN', session.name, 'Human Resources', text, category);
+        const message = await sendChatMessage('ADMIN', session.name, 'Administration', text, category);
         setChatMessages((prev) => [...prev, message]);
       }
     },
     [employee, session, isAdmin]
   );
 
-  const createHire = useCallback(async (input: NewHireInput) => {
-    const created = await createNewHire(input);
-    await refreshData();
-    return created;
-  }, [refreshData]);
+  const createHire = useCallback(
+    async (input: NewHireInput) => {
+      const created = await createNewHire(input);
+      await refreshData();
+      return created;
+    },
+    [refreshData]
+  );
 
-  const updateSupervisor = useCallback(async (empId: string, supervisorId: string) => {
-    await assignSupervisor(empId, supervisorId);
-    await refreshData();
-  }, [refreshData]);
+  const updateSupervisor = useCallback(
+    async (empId: string, supervisorId: string) => {
+      await assignSupervisor(empId, supervisorId);
+      await refreshData();
+    },
+    [refreshData]
+  );
 
   const approveLeave = useCallback(
     async (requestId: string) => {
-      await reviewLeaveRequest(requestId, 'approved', session?.name ?? 'HR Admin');
+      await reviewLeaveRequest(requestId, 'approved', session?.name ?? 'Admin');
       setPendingApprovals((prev) => prev.filter((item) => item.id !== requestId));
       setAdminStats((prev) => ({
         ...prev,
@@ -339,7 +394,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const rejectLeave = useCallback(
     async (requestId: string) => {
-      await reviewLeaveRequest(requestId, 'rejected', session?.name ?? 'HR Admin');
+      await reviewLeaveRequest(requestId, 'rejected', session?.name ?? 'Admin');
       setPendingApprovals((prev) => prev.filter((item) => item.id !== requestId));
       setAdminStats((prev) => ({
         ...prev,
@@ -352,7 +407,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const approveAttendance = useCallback(
     async (recordId: string) => {
-      await reviewAttendanceApproval(recordId, true, session?.name ?? 'HR Admin');
+      await reviewAttendanceApproval(recordId, true, session?.name ?? 'Admin');
       setPendingAttendanceApprovals((prev) => prev.filter((item) => item.id !== recordId));
       setAdminStats((prev) => ({
         ...prev,
@@ -365,7 +420,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const rejectAttendance = useCallback(
     async (recordId: string) => {
-      await reviewAttendanceApproval(recordId, false, session?.name ?? 'HR Admin');
+      await reviewAttendanceApproval(recordId, false, session?.name ?? 'Admin');
       setPendingAttendanceApprovals((prev) => prev.filter((item) => item.id !== recordId));
       setAdminStats((prev) => ({
         ...prev,
@@ -377,6 +432,63 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const getSupervisors = useCallback(() => getSupervisorOptions(), []);
+
+  const insertLeave = useCallback(
+    async (empId: string, date: string, reason: string) => {
+      await insertLeaveForEmployee({
+        employeeId: empId,
+        date,
+        reason,
+        reviewedBy: session?.name ?? 'Admin',
+      });
+      await refreshData();
+    },
+    [session?.name, refreshData]
+  );
+
+  const assignShift = useCallback(
+    async (empId: string, date: string, shiftType: ShiftType) => {
+      await upsertShiftAssignment({ employeeId: empId, date, shiftType });
+      await refreshData();
+    },
+    [refreshData]
+  );
+
+  const deleteShift = useCallback(
+    async (shiftId: string) => {
+      await removeShiftAssignment(shiftId);
+      await refreshData();
+    },
+    [refreshData]
+  );
+
+  const loadShiftChart = useCallback(async (fromDate: string, toDate: string) => {
+    return loadShiftsInRange(fromDate, toDate);
+  }, []);
+
+  const getAttendanceSummaries = useCallback(async (year: number, monthIndex: number) => {
+    const { fromDate, toDate } = monthDateRange(year, monthIndex);
+    const [employees, att, leaves, shifts] = await Promise.all([
+      loadEmployees(),
+      loadAllAttendance(),
+      loadLeaveRequests(),
+      loadShiftsInRange(fromDate, toDate),
+    ]);
+    return employees.map((emp) =>
+      summarizeAttendanceForPeriod(emp, att, leaves, shifts, fromDate, toDate)
+    );
+  }, []);
+
+  const generatePayroll = useCallback(
+    async (year: number, monthIndex: number) => {
+      const slips = await generatePayrollForMonth(year, monthIndex);
+      await refreshData();
+      return slips;
+    },
+    [refreshData]
+  );
+
+  const loadAllPayroll = useCallback(async () => loadPayrollSlips(), []);
 
   const value = useMemo<AppContextValue>(
     () => ({
@@ -395,6 +507,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       pendingApprovals,
       pendingAttendanceApprovals,
       adminStats,
+      peopleOnLeaveToday,
+      upcomingShifts,
+      todayShifts,
       login,
       register,
       logout,
@@ -411,6 +526,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       approveAttendance,
       rejectAttendance,
       getSupervisors,
+      insertLeave,
+      assignShift,
+      deleteShift,
+      loadShiftChart,
+      getAttendanceSummaries,
+      generatePayroll,
+      loadAllPayroll,
     }),
     [
       isLoading,
@@ -427,6 +549,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       pendingApprovals,
       pendingAttendanceApprovals,
       adminStats,
+      peopleOnLeaveToday,
+      upcomingShifts,
+      todayShifts,
       login,
       register,
       logout,
@@ -443,6 +568,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       approveAttendance,
       rejectAttendance,
       getSupervisors,
+      insertLeave,
+      assignShift,
+      deleteShift,
+      loadShiftChart,
+      getAttendanceSummaries,
+      generatePayroll,
+      loadAllPayroll,
     ]
   );
 

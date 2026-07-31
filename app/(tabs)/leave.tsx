@@ -20,18 +20,22 @@ const statusMap = {
   rejected: 'rejected',
 } as const;
 
+const DISPLAYED_LEAVE_TYPES = new Set(['paid', 'unpaid', 'annual']);
+
 const LEAVE_ACCENT: Record<string, string> = {
-  annual: '#4F46E5',
+  paid: '#0F766E',
+  unpaid: '#64748B',
+  annual: '#0F766E',
   sick: '#DC2626',
   personal: '#7C3AED',
-  unpaid: '#64748B',
 };
 
 const LEAVE_EMOJI: Record<string, string> = {
-  annual: '🏖️',
+  paid: '✅',
+  unpaid: '📋',
+  annual: '✅',
   sick: '🤒',
   personal: '🧘',
-  unpaid: '📋',
 };
 
 function LeaveBalanceBox({
@@ -89,8 +93,6 @@ function LeaveBalanceBox({
   );
 }
 
-const DISPLAYED_LEAVE_TYPES = new Set(['annual', 'sick']);
-
 export default function LeaveScreen() {
   const { leaveBalances, leaveRequests, refreshData } = useApp();
   const scheme = useColorScheme() ?? 'light';
@@ -135,7 +137,12 @@ export default function LeaveScreen() {
             total={balance.total}
             used={balance.used}
             pendingDays={leaveRequests
-              .filter((request) => request.type === balance.type && request.status === 'pending')
+              .filter((request) => {
+                const isPaidBucket = balance.type === 'paid' || balance.type === 'annual';
+                const reqPaid = request.type === 'paid' || request.type === 'annual' || request.type === 'sick';
+                if (isPaidBucket) return reqPaid && request.status === 'pending';
+                return request.type === balance.type && request.status === 'pending';
+              })
               .reduce((sum, request) => sum + request.days, 0)}
             accent={LEAVE_ACCENT[balance.type] ?? colors.primary}
             emoji={LEAVE_EMOJI[balance.type] ?? '📅'}

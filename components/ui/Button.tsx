@@ -63,7 +63,7 @@ export function Button({
           pointerEvents: isDisabled ? 'none' : 'auto',
         },
         variant === 'outline' && styles.outline,
-        typeof style === 'function' ? style({ pressed, hovered: false }) : style,
+        typeof style === 'function' ? style({ pressed } as never) : style,
       ]}
       disabled={isDisabled}
       onPress={(event) => {
