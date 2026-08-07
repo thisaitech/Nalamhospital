@@ -10,7 +10,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 
-import { INITIAL_USERS } from '@/constants/config';
+import { DEFAULT_SHIFT_CHANGE_TIMINGS, INITIAL_USERS } from '@/constants/config';
 import {
   FIRESTORE_COLLECTIONS,
   FIRESTORE_SEED_VERSION,
@@ -28,7 +28,6 @@ import {
 import { firestore } from '@/services/firebase';
 import { getItem, setItem } from '@/services/storage';
 import {
-  localCreateNewHireRecords,
   localDeleteShiftAssignment,
   localEnsureSeed,
   localLoadAllAttendance,
@@ -36,23 +35,24 @@ import {
   localLoadAllShiftAssignments,
   localLoadAttendanceForEmployee,
   localLoadChatMessages,
-  localLoadEmployees,
-  localLoadLeaveBalancesMap,
   localLoadLeaveRequests,
   localLoadPerformanceReviews,
   localLoadSalarySlips,
-  localLoadUsers,
   localSaveAttendanceRecords,
   localSaveChatMessage,
-  localSaveEmployees,
-  localSaveLeaveBalancesMap,
   localSaveLeaveRequests,
   localSaveSalarySlips,
   localSaveShiftAssignments,
-  localSaveUsers,
+  localLoadShiftChangeDates,
+  localSaveShiftChangeDates,
+  localLoadShiftChangeTimings,
+  localSaveShiftChangeTimings,
+  localLoadNotifications,
+  localSaveNotifications,
 } from '@/services/localRepository';
 import { sanitizeEmployeeAvatar } from '@/components/ui/EmployeeAvatar';
 import type { ChatMessage } from '@/types/chat';
+import type { AdminNotification } from '@/types/notification';
 import type {
   AppUser,
   AttendanceRecord,
@@ -62,6 +62,7 @@ import type {
   PerformanceReview,
   SalarySlip,
   ShiftAssignment,
+  ShiftChangeTimings,
 } from '@/types/employee';
 
 /** Once Firestore denies access, stay on local storage. */
@@ -116,6 +117,32 @@ async function withStore<T>(
   }
 }
 
+/** Staff/doctor directory always uses Firestore — never the on-device fallback store. */
+async function withCloudOnly<T>(cloud: () => Promise<T>): Promise<T> {
+  try {
+    return await cloud();
+  } catch (error) {
+    if (isPermissionError(error)) {
+      throw new Error(
+        'Could not save to Firebase. Check your internet connection and Firestore rules, then try again.'
+      );
+    }
+    throw error;
+  }
+}
+
+let cloudSeedPromise: Promise<void> | null = null;
+
+async function ensureCloudFirestoreSeed(): Promise<void> {
+  if (!cloudSeedPromise) {
+    cloudSeedPromise = seedFirestoreIfNeeded(true).catch((error) => {
+      cloudSeedPromise = null;
+      throw error;
+    });
+  }
+  await cloudSeedPromise;
+}
+
 function usersCollection() {
   return collection(firestore, FIRESTORE_COLLECTIONS.USERS);
 }
@@ -140,6 +167,10 @@ function chatMessagesCollection() {
   return collection(firestore, FIRESTORE_COLLECTIONS.CHAT_MESSAGES);
 }
 
+function notificationsCollection() {
+  return collection(firestore, FIRESTORE_COLLECTIONS.NOTIFICATIONS);
+}
+
 function salarySlipsCollection() {
   return collection(firestore, FIRESTORE_COLLECTIONS.SALARY_SLIPS);
 }
@@ -150,6 +181,10 @@ function performanceReviewsCollection() {
 
 function shiftAssignmentsCollection() {
   return collection(firestore, FIRESTORE_COLLECTIONS.SHIFT_ASSIGNMENTS);
+}
+
+function clinicSettingsCollection() {
+  return collection(firestore, FIRESTORE_COLLECTIONS.CLINIC_SETTINGS);
 }
 
 function userDocId(email: string) {
@@ -179,8 +214,8 @@ export async function ensureFirestoreSeed(): Promise<void> {
   await seedPromise;
 }
 
-async function seedFirestoreIfNeeded(): Promise<void> {
-  if (forceLocalMode) {
+async function seedFirestoreIfNeeded(ignoreLocalMode = false): Promise<void> {
+  if (!ignoreLocalMode && forceLocalMode) {
     await localEnsureSeed();
     return;
   }
@@ -245,42 +280,39 @@ export async function createNewHireRecords(
   user: AppUser,
   leaveBalances: LeaveBalance[]
 ): Promise<void> {
-  return withStore(
-    async () => {
-      const batch = writeBatch(firestore);
-      batch.set(doc(employeesCollection(), employee.employeeId), employee);
-      batch.set(doc(usersCollection(), userDocId(user.email)), user);
-      batch.set(doc(leaveBalancesCollection(), employee.employeeId), {
-        employeeId: employee.employeeId,
-        balances: leaveBalances,
-      });
-      await batch.commit();
-    },
-    () => localCreateNewHireRecords(employee, user, leaveBalances)
-  );
+  return withCloudOnly(async () => {
+    const batch = writeBatch(firestore);
+    batch.set(doc(employeesCollection(), employee.employeeId), employee);
+    batch.set(doc(usersCollection(), userDocId(user.email)), user);
+    batch.set(doc(leaveBalancesCollection(), employee.employeeId), {
+      employeeId: employee.employeeId,
+      balances: leaveBalances,
+    });
+    await batch.commit();
+  });
 }
 
 export async function loadUsers(): Promise<AppUser[]> {
-  return withStore(async () => {
-    await ensureFirestoreSeed();
+  return withCloudOnly(async () => {
+    await ensureCloudFirestoreSeed();
     const snapshot = await getDocs(usersCollection());
     return snapshot.docs.map((item) => item.data() as AppUser);
-  }, localLoadUsers);
+  });
 }
 
 export async function saveUsers(users: AppUser[]): Promise<void> {
-  return withStore(async () => {
+  return withCloudOnly(async () => {
     const batch = writeBatch(firestore);
     users.forEach((user) => {
       batch.set(doc(usersCollection(), userDocId(user.email)), user);
     });
     await batch.commit();
-  }, () => localSaveUsers(users));
+  });
 }
 
 export async function loadEmployees(): Promise<Employee[]> {
-  return withStore(async () => {
-    await ensureFirestoreSeed();
+  return withCloudOnly(async () => {
+    await ensureCloudFirestoreSeed();
     const snapshot = await getDocs(employeesCollection());
 
     return snapshot.docs.map((item) => {
@@ -294,28 +326,28 @@ export async function loadEmployees(): Promise<Employee[]> {
         busFare: raw.busFare ?? 0,
         dayShiftEnabled: raw.dayShiftEnabled ?? true,
         nightShiftEnabled: raw.nightShiftEnabled ?? false,
-        dayShiftStart: raw.dayShiftStart ?? '09:00',
-        dayShiftEnd: raw.dayShiftEnd ?? '17:00',
-        nightShiftStart: raw.nightShiftStart ?? '21:00',
-        nightShiftEnd: raw.nightShiftEnd ?? '05:00',
+        dayShiftStart: raw.dayShiftStart ?? '08:00',
+        dayShiftEnd: raw.dayShiftEnd ?? '20:00',
+        nightShiftStart: raw.nightShiftStart ?? '20:00',
+        nightShiftEnd: raw.nightShiftEnd ?? '08:00',
       };
     });
-  }, localLoadEmployees);
+  });
 }
 
 export async function saveEmployees(employees: Employee[]): Promise<void> {
-  return withStore(async () => {
+  return withCloudOnly(async () => {
     const batch = writeBatch(firestore);
     employees.forEach((employee) => {
       batch.set(doc(employeesCollection(), employee.employeeId), employee);
     });
     await batch.commit();
-  }, () => localSaveEmployees(employees));
+  });
 }
 
 export async function loadLeaveBalancesMap(): Promise<Record<string, LeaveBalance[]>> {
-  return withStore(async () => {
-    await ensureFirestoreSeed();
+  return withCloudOnly(async () => {
+    await ensureCloudFirestoreSeed();
     const snapshot = await getDocs(leaveBalancesCollection());
     const map: Record<string, LeaveBalance[]> = {};
     snapshot.docs.forEach((item) => {
@@ -323,17 +355,17 @@ export async function loadLeaveBalancesMap(): Promise<Record<string, LeaveBalanc
       map[data.employeeId] = data.balances;
     });
     return map;
-  }, localLoadLeaveBalancesMap);
+  });
 }
 
 export async function saveLeaveBalancesMap(map: Record<string, LeaveBalance[]>): Promise<void> {
-  return withStore(async () => {
+  return withCloudOnly(async () => {
     const batch = writeBatch(firestore);
     Object.entries(map).forEach(([employeeId, balances]) => {
       batch.set(doc(leaveBalancesCollection(), employeeId), { employeeId, balances });
     });
     await batch.commit();
-  }, () => localSaveLeaveBalancesMap(map));
+  });
 }
 
 export async function loadAllAttendance(): Promise<AttendanceRecord[]> {
@@ -415,6 +447,28 @@ export async function saveChatMessage(message: ChatMessage): Promise<void> {
   );
 }
 
+export async function loadNotifications(employeeId?: string): Promise<AdminNotification[]> {
+  return withStore(async () => {
+    await ensureFirestoreSeed();
+    const snapshot = employeeId
+      ? await getDocs(query(notificationsCollection(), where('employeeId', '==', employeeId)))
+      : await getDocs(notificationsCollection());
+    return snapshot.docs
+      .map((item) => item.data() as AdminNotification)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, () => localLoadNotifications(employeeId));
+}
+
+export async function saveNotifications(notifications: AdminNotification[]): Promise<void> {
+  return withStore(async () => {
+    const batch = writeBatch(firestore);
+    notifications.forEach((notification) => {
+      batch.set(doc(notificationsCollection(), notification.id), notification);
+    });
+    await batch.commit();
+  }, () => localSaveNotifications(notifications));
+}
+
 export async function loadSalarySlips(employeeId: string): Promise<SalarySlip[]> {
   return withStore(async () => {
     await ensureFirestoreSeed();
@@ -479,4 +533,49 @@ export async function deleteShiftAssignment(id: string): Promise<void> {
     () => deleteDoc(doc(shiftAssignmentsCollection(), id)),
     () => localDeleteShiftAssignment(id)
   );
+}
+
+export async function loadShiftChangeDates(): Promise<string[]> {
+  return withStore(async () => {
+    await ensureFirestoreSeed();
+    const snap = await getDoc(doc(clinicSettingsCollection(), 'shiftChangeDates'));
+    if (!snap.exists()) return [];
+    const dates = snap.data()?.dates;
+    return Array.isArray(dates) ? (dates as string[]).sort() : [];
+  }, localLoadShiftChangeDates);
+}
+
+export async function saveShiftChangeDates(dates: string[]): Promise<void> {
+  const unique = Array.from(new Set(dates)).sort();
+  return withStore(async () => {
+    await setDoc(doc(clinicSettingsCollection(), 'shiftChangeDates'), { dates: unique });
+  }, () => localSaveShiftChangeDates(unique));
+}
+
+function normalizeShiftChangeTimings(raw: Partial<ShiftChangeTimings> | undefined): ShiftChangeTimings {
+  return {
+    nightStart: raw?.nightStart ?? DEFAULT_SHIFT_CHANGE_TIMINGS.nightStart,
+    nightEnd: raw?.nightEnd ?? DEFAULT_SHIFT_CHANGE_TIMINGS.nightEnd,
+    dayStart: raw?.dayStart ?? DEFAULT_SHIFT_CHANGE_TIMINGS.dayStart,
+    dayEnd: raw?.dayEnd ?? DEFAULT_SHIFT_CHANGE_TIMINGS.dayEnd,
+  };
+}
+
+export async function loadShiftChangeTimings(): Promise<ShiftChangeTimings> {
+  return withStore(async () => {
+    await ensureFirestoreSeed();
+    const snap = await getDoc(doc(clinicSettingsCollection(), 'shiftChangeTimings'));
+    if (!snap.exists()) return { ...DEFAULT_SHIFT_CHANGE_TIMINGS };
+    return normalizeShiftChangeTimings(snap.data() as Partial<ShiftChangeTimings>);
+  }, async () => {
+    const stored = await localLoadShiftChangeTimings();
+    return stored ? normalizeShiftChangeTimings(stored) : { ...DEFAULT_SHIFT_CHANGE_TIMINGS };
+  });
+}
+
+export async function saveShiftChangeTimings(timings: ShiftChangeTimings): Promise<void> {
+  const normalized = normalizeShiftChangeTimings(timings);
+  return withStore(async () => {
+    await setDoc(doc(clinicSettingsCollection(), 'shiftChangeTimings'), normalized);
+  }, () => localSaveShiftChangeTimings(normalized));
 }

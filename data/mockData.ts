@@ -58,9 +58,9 @@ export const MOCK_EMPLOYEES: Employee[] = [
     dayShiftEnabled: true,
     nightShiftEnabled: true,
     dayShiftStart: '08:00',
-    dayShiftEnd: '16:00',
+    dayShiftEnd: '20:00',
     nightShiftStart: '20:00',
-    nightShiftEnd: '04:00',
+    nightShiftEnd: '08:00',
   },
 ];
 
@@ -183,7 +183,7 @@ export function getInitialShifts(): ShiftAssignment[] {
       date: today,
       shiftType: 'day',
       startTime: '08:00',
-      endTime: '16:00',
+      endTime: '20:00',
     },
     {
       id: `shift-EMP001-${tomorrow}-night`,
@@ -199,7 +199,7 @@ export function getInitialShifts(): ShiftAssignment[] {
       date: tomorrow,
       shiftType: 'day',
       startTime: '08:00',
-      endTime: '16:00',
+      endTime: '20:00',
     },
   ];
 }

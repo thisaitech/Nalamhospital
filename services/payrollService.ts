@@ -13,18 +13,27 @@ import type { SalarySlip } from '@/types/employee';
 
 export async function generatePayrollForMonth(
   year: number,
-  monthIndex: number
+  monthIndex: number,
+  employeeId?: string
 ): Promise<SalarySlip[]> {
   const month = MONTH_NAMES[monthIndex];
   if (!month) throw new Error('Invalid month');
 
   const { fromDate, toDate } = monthDateRange(year, monthIndex);
-  const [employees, attendance, leaveRequests, shifts] = await Promise.all([
+  const [allEmployees, attendance, leaveRequests, shifts] = await Promise.all([
     loadEmployees(),
     loadAllAttendance(),
     loadLeaveRequests(),
     loadShiftsInRange(fromDate, toDate),
   ]);
+
+  const employees = employeeId
+    ? allEmployees.filter((e) => e.employeeId === employeeId)
+    : allEmployees;
+
+  if (employeeId && employees.length === 0) {
+    throw new Error('Selected employee was not found.');
+  }
 
   const slips: SalarySlip[] = employees.map((employee) => {
     const summary = summarizeAttendanceForPeriod(

@@ -1,12 +1,12 @@
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, subDays } from 'date-fns';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
-import { Link } from 'expo-router';
+import { Link, type Href, useFocusEffect, useRouter } from 'expo-router';
 
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -29,33 +29,73 @@ function showPunchAlert(title: string, message: string) {
 }
 
 export default function DashboardScreen() {
-  const { employee, attendance, logout, doPunchIn, doPunchOut, peopleOnLeaveToday, upcomingShifts } = useApp();
+  const router = useRouter();
+  const {
+    employee,
+    attendance,
+    logout,
+    doPunchIn,
+    doPunchOut,
+    peopleOnLeaveToday,
+    upcomingShifts,
+    notifications,
+    unreadNotificationCount,
+    refreshData,
+  } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const insets = useSafeAreaInsets();
   const [punchLoading, setPunchLoading] = useState(false);
 
+  useFocusEffect(
+    useCallback(() => {
+      refreshData();
+    }, [refreshData])
+  );
+
   const today = attendance[0];
+  const yesterdayKey = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+  const openOvernight = useMemo(() => {
+    const prior = attendance.find((r) => r.date === yesterdayKey && r.punchIn && !r.punchOut);
+    if (!prior) return null;
+    // Overnight / change-day windows end after midnight
+    return prior;
+  }, [attendance, yesterdayKey]);
 
-  const canPunchIn = today && !today.punchIn;
-  const canPunchOut = today && today.punchIn && !today.punchOut;
-  const punchComplete = Boolean(today?.punchOut);
+  const activePunch = today?.punchIn && !today?.punchOut ? today : openOvernight;
+  const canPunchIn = today && !today.punchIn && !openOvernight;
+  const canPunchOut = Boolean(activePunch?.punchIn && !activePunch?.punchOut);
+  const punchComplete = Boolean(today?.punchOut) && !openOvernight;
 
-  const punchStatus = today?.punchIn ? (today.punchOut ? 'Done' : 'Active') : 'Away';
-  const punchTone = today?.punchIn ? (today.punchOut ? 'success' : 'primary') : 'warning';
+  const punchStatus = activePunch?.punchIn
+    ? activePunch.punchOut
+      ? 'Done'
+      : openOvernight
+        ? 'Overnight'
+        : 'Active'
+    : 'Away';
+  const punchTone = activePunch?.punchIn
+    ? activePunch.punchOut
+      ? 'success'
+      : 'primary'
+    : 'warning';
 
   const punchButtonTitle = punchLoading
     ? 'Please wait...'
     : punchComplete
       ? 'Done for today'
       : canPunchOut
-        ? 'Punch Out'
+        ? openOvernight
+          ? 'Punch Out (overnight)'
+          : 'Punch Out'
         : 'Punch In Now';
 
   const heroHint = punchComplete
     ? 'Attendance completed for today'
     : canPunchOut
-      ? 'Tap below to punch out'
+      ? openOvernight
+        ? 'Finish yesterday’s overnight / change-day shift'
+        : 'Tap below to punch out'
       : 'Tap below to punch in';
 
   const handleHeroPunch = async () => {
@@ -159,10 +199,14 @@ export default function DashboardScreen() {
             <View>
               <Text style={styles.heroLabel}>Today's attendance</Text>
               <Text style={styles.heroStatus}>{punchStatus}</Text>
-              {today?.punchIn ? (
+              {activePunch?.punchIn ? (
                 <Text style={styles.heroTime}>
-                  {formatDisplayTime(today.punchIn)}
-                  {today.punchOut ? ` → ${formatDisplayTime(today.punchOut)}` : ' · still working'}
+                  {formatDisplayTime(activePunch.punchIn)}
+                  {activePunch.punchOut
+                    ? ` → ${formatDisplayTime(activePunch.punchOut)}`
+                    : openOvernight
+                      ? ' · overnight still open'
+                      : ' · still working'}
                 </Text>
               ) : (
                 <Text style={styles.heroTime}>{heroHint}</Text>
@@ -187,6 +231,32 @@ export default function DashboardScreen() {
           </Pressable>
         </LinearGradient>
       </Card>
+
+      {unreadNotificationCount > 0 ? (
+        <Pressable
+          onPress={() =>
+            router.push({
+              pathname: '/announcement',
+              params: { id: notifications.find((n) => !n.read)?.id ?? '' },
+            } as Href)
+          }
+          style={{
+            ...styles.noticeBanner,
+            backgroundColor: colors.primaryLight,
+            borderColor: colors.primary,
+          }}
+        >
+          <View style={styles.noticeHeader}>
+            <Ionicons name="notifications" size={18} color={colors.primary} />
+            <Text style={[styles.noticeTitle, { color: colors.primary }]}>
+              {unreadNotificationCount} new message{unreadNotificationCount === 1 ? '' : 's'} from admin
+            </Text>
+          </View>
+          <Text style={[styles.noticeBody, { color: colors.text }]} numberOfLines={2}>
+            {notifications.find((n) => !n.read)?.body ?? 'Tap to read'}
+          </Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.quickLinks}>
         <Link href="/leave-request" asChild>
@@ -298,6 +368,15 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   heroBtnText: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
+  noticeBanner: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+  },
+  noticeHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  noticeTitle: { fontSize: 13, fontWeight: '800', flex: 1 },
+  noticeBody: { fontSize: 14, lineHeight: 20, fontWeight: '500' },
   quickLinks: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   quickBtn: { flex: 1 },
   historyCard: { marginBottom: 10, paddingVertical: 14, paddingHorizontal: 14 },

@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
+import { MOBILE_WEB_MAX_WIDTH } from '@/constants/mobileWeb';
 import type { UserRole } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
 
@@ -47,6 +48,9 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [fieldsReady, setFieldsReady] = useState(Platform.OS !== 'web');
+  const { width: screenWidth } = useWindowDimensions();
+  const layoutWidth = Platform.OS === 'web' ? Math.min(screenWidth, MOBILE_WEB_MAX_WIDTH) : screenWidth;
+  const bannerBodyHeight = Math.max(120, Math.round(layoutWidth / BANNER_ASPECT));
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -159,8 +163,6 @@ export default function LoginScreen() {
   };
 
   const isRegister = mode === 'register';
-  const { width: screenWidth } = useWindowDimensions();
-  const bannerBodyHeight = Math.max(120, Math.round(screenWidth / BANNER_ASPECT));
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -168,7 +170,7 @@ export default function LoginScreen() {
         <View style={{ height: insets.top, backgroundColor: BANNER_MAROON }} />
         <Image
           source={require('@/assets/images/nalam-clinic-logo.png')}
-          style={[styles.bannerImage, { width: screenWidth, height: bannerBodyHeight }]}
+          style={[styles.bannerImage, { width: layoutWidth, height: bannerBodyHeight }]}
           resizeMode="stretch"
           accessibilityLabel="Nalam Clinic"
         />

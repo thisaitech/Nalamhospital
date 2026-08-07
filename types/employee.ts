@@ -5,6 +5,14 @@ export type StaffCategory = 'doctor' | 'staff';
 
 export type ShiftType = 'day' | 'night';
 
+/** Admin-configurable hours used on shift-change days. */
+export interface ShiftChangeTimings {
+  nightStart: string;
+  nightEnd: string;
+  dayStart: string;
+  dayEnd: string;
+}
+
 export interface Employee {
   id: string;
   employeeId: string;
@@ -67,6 +75,12 @@ export interface AttendanceRecord {
   status: 'present' | 'absent' | 'half-day' | 'late' | 'on-leave';
   manualApprovalStatus?: 'pending' | 'approved' | 'rejected';
   shiftType?: ShiftType | 'both' | null;
+  /** Minutes late vs scheduled shift start (excluding grace). */
+  lateMinutes?: number;
+  /** Seconds late vs scheduled shift start (strict, no grace). */
+  lateSeconds?: number;
+  /** Admin-entered lateness penalty for this day. */
+  penaltyAmount?: number;
 }
 
 /** Paid leave is auto-applied until quota is used; then unpaid. */
@@ -199,4 +213,6 @@ export interface PersonOnLeave {
   department: string;
   leaveType: LeaveType;
   reason: string;
+  /** Set when listing pending/approved applications for a date. */
+  leaveStatus?: 'pending' | 'approved';
 }

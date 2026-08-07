@@ -13,7 +13,6 @@ const ROUTE_TO_TAB: Record<string, TabPictureKey> = {
   index: 'home',
   attendance: 'time',
   leave: 'leave',
-  chat: 'chat',
   salary: 'pay',
 };
 
@@ -47,7 +46,10 @@ export function PremiumTabBar({ state, descriptors, navigation }: PremiumTabBarP
           },
         ]}
       >
-        {state.routes.map((route, index) => {
+        {state.routes
+          .map((route, index) => ({ route, index }))
+          .filter(({ route }) => descriptors[route.key].options.href !== null)
+          .map(({ route, index }) => {
           const focused = state.index === index;
           const tabKey = ROUTE_TO_TAB[route.name] ?? 'home';
           const icons = TAB_NAV_ICONS[tabKey];

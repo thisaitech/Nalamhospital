@@ -86,6 +86,46 @@ export async function peopleOnLeaveForDate(
   return results;
 }
 
+/** Pending or approved leave overlapping a date (for leave request picker). */
+export async function peopleWithLeaveOnDate(
+  date: string,
+  requests: LeaveRequest[],
+  excludeEmployeeId?: string
+): Promise<PersonOnLeave[]> {
+  const active = requests.filter(
+    (r) =>
+      (r.status === 'approved' || r.status === 'pending') &&
+      date >= r.startDate &&
+      date <= r.endDate &&
+      r.employeeId !== excludeEmployeeId
+  );
+
+  const results: PersonOnLeave[] = [];
+  for (const request of active) {
+    const employee = await findEmployeeById(request.employeeId);
+    results.push({
+      employeeId: request.employeeId,
+      employeeName: employee ? getEmployeeDisplayName(employee) : request.employeeId,
+      staffCategory: employee?.staffCategory ?? 'staff',
+      department: employee?.department ?? '—',
+      leaveType: normalizeLeaveType(request.type),
+      reason: request.reason,
+      leaveStatus: request.status === 'pending' ? 'pending' : 'approved',
+    });
+  }
+  return results.sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+}
+
+/** Doctors see all leave; staff see staff leave only; admin sees all (pass isAdmin). */
+export function filterVisibleLeave(
+  people: PersonOnLeave[],
+  viewerCategory: StaffCategory | null | undefined,
+  isAdmin = false
+): PersonOnLeave[] {
+  if (isAdmin || viewerCategory === 'doctor') return people;
+  return people.filter((person) => person.staffCategory === 'staff');
+}
+
 export function formatLeaveDayLabel(date: string): string {
   try {
     return format(parseISO(date), 'EEE, MMM d');

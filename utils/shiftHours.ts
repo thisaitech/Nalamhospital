@@ -1,7 +1,13 @@
 import { differenceInMinutes, parseISO } from 'date-fns';
 
-import { OT_GRACE_HOURS } from '@/constants/config';
-import type { Employee, ShiftAssignment, ShiftType } from '@/types/employee';
+import {
+  DEFAULT_DAY_SHIFT,
+  DEFAULT_NIGHT_SHIFT,
+  OT_GRACE_HOURS,
+  SHIFT_CHANGE_DAY_TIMING,
+  SHIFT_CHANGE_NIGHT_TIMING,
+} from '@/constants/config';
+import type { Employee, ShiftAssignment, ShiftChangeTimings, ShiftType } from '@/types/employee';
 
 /** Parse HH:mm or HH:mm:ss into minutes from midnight. */
 export function timeToMinutes(time: string): number {
@@ -9,10 +15,14 @@ export function timeToMinutes(time: string): number {
   return h * 60 + (m || 0);
 }
 
+export function shiftCrossesMidnight(start: string, end: string): boolean {
+  return timeToMinutes(end) <= timeToMinutes(start);
+}
+
 export function calcHoursBetween(start: string, end: string): number {
   const startMin = timeToMinutes(start);
   let endMin = timeToMinutes(end);
-  // Night shifts that cross midnight
+  // Night / change-day windows that cross midnight
   if (endMin <= startMin) {
     endMin += 24 * 60;
   }
@@ -34,14 +44,44 @@ function normalizeTime(time: string): string {
   return time;
 }
 
+/** Normal clinic timings from the employee profile (admin-fixed 8–8 by default). */
 export function getShiftTiming(
   employee: Employee,
   shiftType: ShiftType
 ): { start: string; end: string } {
   if (shiftType === 'day') {
-    return { start: employee.dayShiftStart, end: employee.dayShiftEnd };
+    return {
+      start: employee.dayShiftStart || DEFAULT_DAY_SHIFT.start,
+      end: employee.dayShiftEnd || DEFAULT_DAY_SHIFT.end,
+    };
   }
-  return { start: employee.nightShiftStart, end: employee.nightShiftEnd };
+  return {
+    start: employee.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
+    end: employee.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
+  };
+}
+
+/**
+ * Effective window for a date. On shift-change days uses admin-configured timings.
+ */
+export function getEffectiveShiftTiming(
+  employee: Employee,
+  shiftType: ShiftType,
+  isChangeDay: boolean,
+  changeTimings?: ShiftChangeTimings
+): { start: string; end: string } {
+  if (isChangeDay) {
+    const night = {
+      start: changeTimings?.nightStart ?? SHIFT_CHANGE_DAY_TIMING.start,
+      end: changeTimings?.nightEnd ?? SHIFT_CHANGE_DAY_TIMING.end,
+    };
+    const day = {
+      start: changeTimings?.dayStart ?? SHIFT_CHANGE_NIGHT_TIMING.start,
+      end: changeTimings?.dayEnd ?? SHIFT_CHANGE_NIGHT_TIMING.end,
+    };
+    return shiftType === 'night' ? night : day;
+  }
+  return getShiftTiming(employee, shiftType);
 }
 
 export function scheduledHoursFromAssignments(assignments: ShiftAssignment[]): number {

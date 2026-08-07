@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -9,18 +10,23 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { parseISO } from 'date-fns';
 
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { SelectField } from '@/components/ui/SelectField';
+import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
+import { LEAVE_TYPE_LABELS } from '@/constants/config';
 import {
   buildLeaveDateOptions,
   getLeaveReasonLabel,
   LEAVE_REASON_OPTIONS,
 } from '@/constants/leaveOptions';
+import { loadLeaveRequests } from '@/services/firestoreRepository';
 import { useColorScheme } from '@/components/useColorScheme';
+import { filterVisibleLeave, formatLeaveDayLabel, peopleWithLeaveOnDate } from '@/utils/clinicLeave';
+import type { PersonOnLeave } from '@/types/employee';
 
 function showAlert(title: string, message: string, onOk?: () => void) {
   if (Platform.OS === 'web') {
@@ -41,6 +47,8 @@ export default function LeaveRequestModal() {
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [touched, setTouched] = useState({ date: false, reason: false });
+  const [leaveOnDate, setLeaveOnDate] = useState<PersonOnLeave[]>([]);
+  const [loadingLeaveOnDate, setLoadingLeaveOnDate] = useState(false);
 
   const dateOptions = useMemo(() => buildLeaveDateOptions(90), []);
 
@@ -51,22 +59,36 @@ export default function LeaveRequestModal() {
   const reasonError = touched.reason && !reason ? 'Reason is required' : undefined;
   const formComplete = Boolean(leaveDate && reason);
 
-  const leaveDays = useMemo(() => {
-    if (!leaveDate) return 0;
-    try {
-      parseISO(leaveDate);
-      return 1;
-    } catch {
-      return 0;
-    }
-  }, [leaveDate]);
-
   const autoTypeHint =
     paidRemaining > 0
       ? `Will be marked as Paid Leave (${paidRemaining} paid day(s) remaining)`
       : 'Paid quota used up — will be marked as Unpaid Leave';
 
   const approverName = employee?.manager ?? 'Clinic Admin';
+
+  useEffect(() => {
+    if (!leaveDate) {
+      setLeaveOnDate([]);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setLoadingLeaveOnDate(true);
+      try {
+        const requests = await loadLeaveRequests();
+        const people = await peopleWithLeaveOnDate(leaveDate, requests, employee?.employeeId);
+        const visible = filterVisibleLeave(people, employee?.staffCategory ?? 'staff');
+        if (!cancelled) setLeaveOnDate(visible);
+      } finally {
+        if (!cancelled) setLoadingLeaveOnDate(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [leaveDate, employee?.employeeId, employee?.staffCategory]);
 
   const handleSubmit = async () => {
     setTouched({ date: true, reason: true });
@@ -119,13 +141,6 @@ export default function LeaveRequestModal() {
           </Text>
         </View>
 
-        <View style={[styles.balanceHint, { backgroundColor: colors.card, borderColor: colors.borderLight }]}>
-          <Text style={[styles.hintText, { color: colors.text }]}>{autoTypeHint}</Text>
-          {leaveDays > 0 ? (
-            <Text style={[styles.hintSub, { color: colors.textSecondary }]}>{leaveDays} day requested</Text>
-          ) : null}
-        </View>
-
         <SelectField
           label="Leave date"
           value={leaveDate}
@@ -160,6 +175,44 @@ export default function LeaveRequestModal() {
           style={styles.submit}
         />
         <Button title="Cancel" variant="outline" onPress={() => router.back()} />
+
+        {leaveDate ? (
+          <View style={styles.leaveOnDaySection}>
+            <Text style={[styles.leaveOnDayTitle, { color: colors.text }]}>
+              On leave {formatLeaveDayLabel(leaveDate)}
+            </Text>
+            {loadingLeaveOnDate ? (
+              <ActivityIndicator size="small" color={colors.primary} style={styles.leaveOnDayLoader} />
+            ) : leaveOnDate.length === 0 ? (
+              <Card style={styles.leaveOnDayCard}>
+                <Text style={[styles.leaveOnDayEmpty, { color: colors.textSecondary }]}>
+                  No one else has applied for leave on this day.
+                </Text>
+              </Card>
+            ) : (
+              leaveOnDate.map((person) => (
+                <Card key={`${person.employeeId}-${person.leaveStatus}`} style={styles.leaveOnDayCard}>
+                  <View style={styles.leaveOnDayRow}>
+                    <View style={styles.leaveOnDayInfo}>
+                      <Text style={[styles.leaveOnDayName, { color: colors.text }]}>{person.employeeName}</Text>
+                      <Text style={[styles.leaveOnDayMeta, { color: colors.textSecondary }]}>
+                        {person.staffCategory === 'doctor' ? 'Doctor' : 'Staff'} · {person.department}
+                      </Text>
+                    </View>
+                    <StatusBadge
+                      label={person.leaveStatus === 'pending' ? 'Pending' : 'Approved'}
+                      tone={person.leaveStatus === 'pending' ? 'warning' : 'success'}
+                    />
+                  </View>
+                  <Text style={[styles.leaveOnDayReason, { color: colors.textMuted }]}>
+                    {LEAVE_TYPE_LABELS[person.leaveType] ?? person.leaveType}
+                    {person.reason ? ` · ${person.reason}` : ''}
+                  </Text>
+                </Card>
+              ))
+            )}
+          </View>
+        ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -190,13 +243,15 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: '500',
   },
-  balanceHint: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-  },
-  hintText: { fontSize: 13, fontWeight: '600' },
-  hintSub: { fontSize: 12, marginTop: 4 },
+  leaveOnDaySection: { marginTop: 20, gap: 8 },
+  leaveOnDayTitle: { fontSize: 15, fontWeight: '700' },
+  leaveOnDayLoader: { marginVertical: 8 },
+  leaveOnDayCard: { paddingVertical: 12 },
+  leaveOnDayEmpty: { textAlign: 'center', fontSize: 13 },
+  leaveOnDayRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
+  leaveOnDayInfo: { flex: 1 },
+  leaveOnDayName: { fontSize: 15, fontWeight: '700' },
+  leaveOnDayMeta: { fontSize: 12, marginTop: 2 },
+  leaveOnDayReason: { fontSize: 12, marginTop: 8 },
   submit: { marginTop: 24, marginBottom: 10 },
 });

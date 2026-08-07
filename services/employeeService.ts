@@ -1,4 +1,4 @@
-import { format } from 'date-fns';
+import { format, subDays } from 'date-fns';
 
 import { createTodayAttendance } from '@/data/mockData';
 import { getLeaveBalances as getBalances, findEmployeeById } from '@/services/employeeRegistry';
@@ -18,6 +18,7 @@ import {
   calculateOtHours,
   primaryShiftType,
   scheduledHoursFromAssignments,
+  shiftCrossesMidnight,
 } from '@/utils/shiftHours';
 import type {
   AttendanceRecord,
@@ -52,11 +53,25 @@ function nowTime(): string {
   return format(new Date(), 'HH:mm:ss');
 }
 
-function assertSameDayOnly(recordDate: string) {
+function assertSameDayPunchIn(recordDate: string) {
   const today = new Date().toISOString().split('T')[0];
   if (recordDate !== today) {
     throw new Error('Attendance can only be marked for today. Backdating is not allowed.');
   }
+}
+
+async function findOpenOvernightRecord(
+  employeeId: string,
+  records: AttendanceRecord[]
+): Promise<AttendanceRecord | null> {
+  const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+  const open = records.find((r) => r.date === yesterday && r.punchIn && !r.punchOut);
+  if (!open) return null;
+
+  const shifts = await loadShiftsForDate(yesterday);
+  const myShifts = shifts.filter((s) => s.employeeId === employeeId);
+  const overnight = myShifts.some((s) => shiftCrossesMidnight(s.startTime, s.endTime));
+  return overnight ? open : null;
 }
 
 export async function punchIn(
@@ -65,8 +80,13 @@ export async function punchIn(
   wifiSsid: string | null = null
 ): Promise<AttendanceRecord> {
   const records = await loadAttendance(employeeId);
+  const openOvernight = await findOpenOvernightRecord(employeeId, records);
+  if (openOvernight) {
+    throw new Error('Punch out from yesterday\'s overnight shift before punching in today.');
+  }
+
   const today = records[0];
-  assertSameDayOnly(today.date);
+  assertSameDayPunchIn(today.date);
   if (today.punchIn) {
     throw new Error('Already punched in today');
   }
@@ -91,23 +111,33 @@ export async function punchIn(
 
 export async function punchOut(employeeId: string, method: PunchMethod): Promise<AttendanceRecord> {
   const records = await loadAttendance(employeeId);
-  const today = records[0];
-  assertSameDayOnly(today.date);
-  if (!today.punchIn) {
+  const today = records.find((r) => r.date === new Date().toISOString().split('T')[0]) ?? records[0];
+
+  let target: AttendanceRecord | null = null;
+  if (today.punchIn && !today.punchOut) {
+    target = today;
+  } else {
+    target = await findOpenOvernightRecord(employeeId, records);
+  }
+
+  if (!target) {
     throw new Error('You must punch in first');
   }
-  if (today.punchOut) {
-    throw new Error('Already punched out today');
+  if (target.punchOut) {
+    throw new Error('Already punched out');
+  }
+  if (!target.punchIn) {
+    throw new Error('You must punch in first');
   }
 
   const punchOutTime = nowTime();
-  const shifts = await loadShiftsForDate(today.date);
+  const shifts = await loadShiftsForDate(target.date);
   const myShifts = shifts.filter((s) => s.employeeId === employeeId);
-  const hoursWorked = calcPunchHours(today.punchIn, punchOutTime);
+  const hoursWorked = calcPunchHours(target.punchIn, punchOutTime);
   const otHours = calculateOtHours(punchOutTime, myShifts);
 
   const updated: AttendanceRecord = {
-    ...today,
+    ...target,
     punchOut: punchOutTime,
     punchOutMethod: method,
     hoursWorked,

@@ -12,6 +12,7 @@ import {
 import { getItem, setItem } from '@/services/storage';
 import { sanitizeEmployeeAvatar } from '@/components/ui/EmployeeAvatar';
 import type { ChatMessage } from '@/types/chat';
+import type { AdminNotification } from '@/types/notification';
 import type {
   AppUser,
   AttendanceRecord,
@@ -21,6 +22,7 @@ import type {
   PerformanceReview,
   SalarySlip,
   ShiftAssignment,
+  ShiftChangeTimings,
 } from '@/types/employee';
 
 const LOCAL_KEYS = {
@@ -31,9 +33,12 @@ const LOCAL_KEYS = {
   ATTENDANCE: '@hospitalhrm/local_attendance',
   LEAVE_REQUESTS: '@hospitalhrm/local_leave_requests',
   CHAT_MESSAGES: '@hospitalhrm/local_chat_messages',
+  NOTIFICATIONS: '@hospitalhrm/local_notifications',
   SALARY_SLIPS: '@hospitalhrm/local_salary_slips',
   PERFORMANCE_REVIEWS: '@hospitalhrm/local_performance_reviews',
   SHIFT_ASSIGNMENTS: '@hospitalhrm/local_shift_assignments',
+  SHIFT_CHANGE_DATES: '@hospitalhrm/local_shift_change_dates',
+  SHIFT_CHANGE_TIMINGS: '@hospitalhrm/local_shift_change_timings',
 } as const;
 
 async function ensureLocalSeed(): Promise<void> {
@@ -69,10 +74,10 @@ function withEmployeeDefaults(raw: Employee): Employee {
     busFare: raw.busFare ?? 0,
     dayShiftEnabled: raw.dayShiftEnabled ?? true,
     nightShiftEnabled: raw.nightShiftEnabled ?? false,
-    dayShiftStart: raw.dayShiftStart ?? '09:00',
-    dayShiftEnd: raw.dayShiftEnd ?? '17:00',
-    nightShiftStart: raw.nightShiftStart ?? '21:00',
-    nightShiftEnd: raw.nightShiftEnd ?? '05:00',
+    dayShiftStart: raw.dayShiftStart ?? '08:00',
+    dayShiftEnd: raw.dayShiftEnd ?? '20:00',
+    nightShiftStart: raw.nightShiftStart ?? '20:00',
+    nightShiftEnd: raw.nightShiftEnd ?? '08:00',
   };
 }
 
@@ -243,4 +248,40 @@ export async function localDeleteShiftAssignment(id: string): Promise<void> {
     LOCAL_KEYS.SHIFT_ASSIGNMENTS,
     existing.filter((a) => a.id !== id)
   );
+}
+
+export async function localLoadShiftChangeDates(): Promise<string[]> {
+  await ensureLocalSeed();
+  return (await getItem<string[]>(LOCAL_KEYS.SHIFT_CHANGE_DATES)) ?? [];
+}
+
+export async function localSaveShiftChangeDates(dates: string[]): Promise<void> {
+  await ensureLocalSeed();
+  const unique = Array.from(new Set(dates)).sort();
+  await setItem(LOCAL_KEYS.SHIFT_CHANGE_DATES, unique);
+}
+
+export async function localLoadShiftChangeTimings(): Promise<ShiftChangeTimings | null> {
+  await ensureLocalSeed();
+  return (await getItem<ShiftChangeTimings>(LOCAL_KEYS.SHIFT_CHANGE_TIMINGS)) ?? null;
+}
+
+export async function localSaveShiftChangeTimings(timings: ShiftChangeTimings): Promise<void> {
+  await ensureLocalSeed();
+  await setItem(LOCAL_KEYS.SHIFT_CHANGE_TIMINGS, timings);
+}
+
+export async function localLoadNotifications(employeeId?: string): Promise<AdminNotification[]> {
+  await ensureLocalSeed();
+  const all = (await getItem<AdminNotification[]>(LOCAL_KEYS.NOTIFICATIONS)) ?? [];
+  const filtered = employeeId ? all.filter((n) => n.employeeId === employeeId) : all;
+  return filtered.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function localSaveNotifications(notifications: AdminNotification[]): Promise<void> {
+  await ensureLocalSeed();
+  const existing = (await getItem<AdminNotification[]>(LOCAL_KEYS.NOTIFICATIONS)) ?? [];
+  const map = new Map(existing.map((n) => [n.id, n]));
+  notifications.forEach((n) => map.set(n.id, n));
+  await setItem(LOCAL_KEYS.NOTIFICATIONS, Array.from(map.values()));
 }

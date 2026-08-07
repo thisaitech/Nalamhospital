@@ -11,7 +11,13 @@ import {
   reviewAttendanceApproval,
   reviewLeaveRequest,
 } from '@/services/adminService';
-import { loadChatMessages, sendChatMessage } from '@/services/chatService';
+import { loadAdminBroadcasts, sendAdminBroadcast } from '@/services/chatService';
+import {
+  countUnreadNotifications,
+  getNotificationsForEmployee,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from '@/services/notificationService';
 import {
   assignSupervisor,
   createNewHire,
@@ -40,10 +46,15 @@ import {
   loadShiftsForDate,
   loadShiftsInRange,
   removeShiftAssignment,
+  setShiftChangeDay,
+  getShiftChangeDates,
+  isShiftChangeDay,
+  swapRolesAfterChangeDay,
   upsertShiftAssignment,
 } from '@/services/shiftService';
 import { getItem, removeItem, setItem, storageKeys } from '@/services/storage';
 import type { ChatCategory, ChatMessage } from '@/types/chat';
+import type { AdminNotification } from '@/types/notification';
 import type {
   AttendanceRecord,
   Employee,
@@ -61,6 +72,7 @@ import type {
   UserRole,
 } from '@/types/employee';
 import { monthDateRange, summarizeAttendanceForPeriod } from '@/utils/attendanceSummary';
+import { filterVisibleLeave } from '@/utils/clinicLeave';
 import type { AttendanceSummary } from '@/types/employee';
 
 interface Session {
@@ -94,6 +106,8 @@ interface AppContextValue {
   leaveRequests: LeaveRequest[];
   salarySlips: SalarySlip[];
   chatMessages: ChatMessage[];
+  notifications: AdminNotification[];
+  unreadNotificationCount: number;
   allEmployees: Employee[];
   pendingApprovals: EnrichedLeaveRequest[];
   pendingAttendanceApprovals: EnrichedAttendanceApproval[];
@@ -110,6 +124,8 @@ interface AppContextValue {
   doPunchOut: (method: PunchMethod) => Promise<AttendanceRecord | null>;
   requestLeave: (type: LeaveType | null, startDate: string, endDate: string, reason: string) => Promise<void>;
   sendMessage: (text: string, category?: ChatCategory) => Promise<void>;
+  markNotificationAsRead: (notificationId: string) => Promise<void>;
+  markAllNotificationsAsRead: () => Promise<void>;
   createHire: (input: NewHireInput) => Promise<Employee>;
   updateSupervisor: (employeeId: string, supervisorId: string) => Promise<void>;
   approveLeave: (requestId: string) => Promise<void>;
@@ -121,8 +137,12 @@ interface AppContextValue {
   assignShift: (employeeId: string, date: string, shiftType: ShiftType) => Promise<void>;
   deleteShift: (shiftId: string) => Promise<void>;
   loadShiftChart: (fromDate: string, toDate: string) => Promise<ShiftAssignment[]>;
+  checkShiftChangeDay: (date: string) => Promise<boolean>;
+  markShiftChangeDay: (date: string, enabled: boolean) => Promise<void>;
+  loadShiftChangeDates: () => Promise<string[]>;
+  completeShiftChangeSwap: (date: string) => Promise<number>;
   getAttendanceSummaries: (year: number, monthIndex: number) => Promise<AttendanceSummary[]>;
-  generatePayroll: (year: number, monthIndex: number) => Promise<SalarySlip[]>;
+  generatePayroll: (year: number, monthIndex: number, employeeId?: string) => Promise<SalarySlip[]>;
   loadAllPayroll: () => Promise<SalarySlip[]>;
 }
 
@@ -137,6 +157,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
   const [salarySlips, setSalarySlips] = useState<SalarySlip[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [notifications, setNotifications] = useState<AdminNotification[]>([]);
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<EnrichedLeaveRequest[]>([]);
   const [pendingAttendanceApprovals, setPendingAttendanceApprovals] = useState<EnrichedAttendanceApproval[]>([]);
@@ -157,12 +178,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshData = useCallback(async () => {
     const today = new Date().toISOString().split('T')[0];
     const [messages, onLeave, shiftsToday] = await Promise.all([
-      loadChatMessages(),
+      loadAdminBroadcasts(),
       getPeopleOnLeaveToday(today),
       loadShiftsForDate(today),
     ]);
     setChatMessages(messages);
-    setPeopleOnLeaveToday(onLeave);
+    setPeopleOnLeaveToday(
+      session?.role === 'admin'
+        ? onLeave
+        : filterVisibleLeave(onLeave, employee?.staffCategory ?? 'staff')
+    );
     setTodayShifts(shiftsToday);
 
     if (session?.role === 'admin') {
@@ -184,20 +209,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (employeeId) {
-      const [att, leaves, balances, slips, upcoming] = await Promise.all([
+      const [att, leaves, balances, slips, upcoming, employeeNotifications] = await Promise.all([
         loadAttendance(employeeId),
         getLeaveRequests(employeeId),
         getLeaveBalances(employeeId),
         getSalarySlips(employeeId),
         getUpcomingShifts(employeeId),
+        getNotificationsForEmployee(employeeId),
       ]);
       setAttendance(att);
       setLeaveRequests(leaves);
       setLeaveBalances(balances);
       setSalarySlips(slips);
       setUpcomingShifts(upcoming);
+      setNotifications(employeeNotifications);
     }
-  }, [employeeId, session?.role]);
+  }, [employeeId, employee?.staffCategory, session?.role]);
 
   useEffect(() => {
     (async () => {
@@ -217,7 +244,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             setSession(saved);
           }
         }
-        const messages = await loadChatMessages();
+        const messages = await loadAdminBroadcasts();
         setChatMessages(messages);
       } finally {
         setIsLoading(false);
@@ -306,6 +333,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPeopleOnLeaveToday([]);
     setUpcomingShifts([]);
     setTodayShifts([]);
+    setNotifications([]);
+    setChatMessages([]);
     setAdminStats({ totalEmployees: 0, totalSupervisors: 0, pendingApprovals: 0, departments: 0 });
   }, []);
 
@@ -342,25 +371,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const sendMessage = useCallback(
     async (text: string, category: ChatCategory = 'general') => {
-      if (!session) return;
-      if (employee) {
-        const message = await sendChatMessage(
-          employee.employeeId,
-          getEmployeeDisplayName(employee),
-          employee.department,
-          text,
-          category
-        );
-        setChatMessages((prev) => [...prev, message]);
-        return;
-      }
-      if (isAdmin) {
-        const message = await sendChatMessage('ADMIN', session.name, 'Administration', text, category);
-        setChatMessages((prev) => [...prev, message]);
-      }
+      if (!session || !isAdmin) return;
+      const message = await sendAdminBroadcast(session.name, text, category);
+      setChatMessages((prev) => [...prev, message]);
     },
-    [employee, session, isAdmin]
+    [session, isAdmin]
   );
+
+  const markNotificationAsRead = useCallback(
+    async (notificationId: string) => {
+      await markNotificationRead(notificationId);
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
+      );
+    },
+    []
+  );
+
+  const markAllNotificationsAsRead = useCallback(async () => {
+    if (!employeeId) return;
+    await markAllNotificationsRead(employeeId);
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  }, [employeeId]);
 
   const createHire = useCallback(
     async (input: NewHireInput) => {
@@ -466,6 +498,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return loadShiftsInRange(fromDate, toDate);
   }, []);
 
+  const checkShiftChangeDay = useCallback(async (date: string) => isShiftChangeDay(date), []);
+
+  const markShiftChangeDay = useCallback(
+    async (date: string, enabled: boolean) => {
+      await setShiftChangeDay(date, enabled);
+      await refreshData();
+    },
+    [refreshData]
+  );
+
+  const loadShiftChangeDateList = useCallback(async () => getShiftChangeDates(), []);
+
+  const completeShiftChangeSwap = useCallback(
+    async (date: string) => {
+      const count = await swapRolesAfterChangeDay(date);
+      await refreshData();
+      return count;
+    },
+    [refreshData]
+  );
+
   const getAttendanceSummaries = useCallback(async (year: number, monthIndex: number) => {
     const { fromDate, toDate } = monthDateRange(year, monthIndex);
     const [employees, att, leaves, shifts] = await Promise.all([
@@ -480,8 +533,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const generatePayroll = useCallback(
-    async (year: number, monthIndex: number) => {
-      const slips = await generatePayrollForMonth(year, monthIndex);
+    async (year: number, monthIndex: number, employeeId?: string) => {
+      const slips = await generatePayrollForMonth(year, monthIndex, employeeId);
       await refreshData();
       return slips;
     },
@@ -489,6 +542,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loadAllPayroll = useCallback(async () => loadPayrollSlips(), []);
+
+  const unreadNotificationCount = useMemo(
+    () => countUnreadNotifications(notifications),
+    [notifications]
+  );
 
   const value = useMemo<AppContextValue>(
     () => ({
@@ -503,6 +561,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       leaveRequests,
       salarySlips,
       chatMessages,
+      notifications,
+      unreadNotificationCount,
       allEmployees,
       pendingApprovals,
       pendingAttendanceApprovals,
@@ -519,6 +579,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       doPunchOut,
       requestLeave,
       sendMessage,
+      markNotificationAsRead,
+      markAllNotificationsAsRead,
       createHire,
       updateSupervisor,
       approveLeave,
@@ -530,6 +592,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       assignShift,
       deleteShift,
       loadShiftChart,
+      checkShiftChangeDay,
+      markShiftChangeDay,
+      loadShiftChangeDates: loadShiftChangeDateList,
+      completeShiftChangeSwap,
       getAttendanceSummaries,
       generatePayroll,
       loadAllPayroll,
@@ -545,6 +611,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       leaveRequests,
       salarySlips,
       chatMessages,
+      notifications,
+      unreadNotificationCount,
       allEmployees,
       pendingApprovals,
       pendingAttendanceApprovals,
@@ -561,6 +629,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       doPunchOut,
       requestLeave,
       sendMessage,
+      markNotificationAsRead,
+      markAllNotificationsAsRead,
       createHire,
       updateSupervisor,
       approveLeave,
@@ -572,6 +642,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       assignShift,
       deleteShift,
       loadShiftChart,
+      checkShiftChangeDay,
+      markShiftChangeDay,
+      loadShiftChangeDateList,
+      completeShiftChangeSwap,
       getAttendanceSummaries,
       generatePayroll,
       loadAllPayroll,

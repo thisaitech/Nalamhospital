@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Link } from 'expo-router';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Link, useRouter, type Href } from 'expo-router';
 import { format } from 'date-fns';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,7 +12,38 @@ import { LEAVE_TYPE_LABELS } from '@/constants/config';
 import { getEmployeeDisplayName } from '@/services/employeeRegistry';
 import { useColorScheme } from '@/components/useColorScheme';
 
+const MESSAGE_BLUE = '#1A73E8';
+const LINE_BLUE = '#8AB4F8';
+
+function MessagesAppIcon({ size = 48 }: { size?: number }) {
+  const bubbleWidth = size * 0.52;
+  const bubbleHeight = size * 0.44;
+  const lineWidth = bubbleWidth * 0.62;
+  const shortLineWidth = bubbleWidth * 0.38;
+
+  return (
+    <View style={[iconStyles.circle, { width: size, height: size, borderRadius: size / 2 }]}>
+      <View
+        style={[
+          iconStyles.bubble,
+          { width: bubbleWidth, height: bubbleHeight, borderRadius: bubbleHeight * 0.28 },
+        ]}
+      >
+        <View
+          style={[iconStyles.tail, { borderTopWidth: bubbleHeight * 0.18, borderRightWidth: bubbleHeight * 0.14 }]}
+        />
+        <View style={[iconStyles.line, { width: lineWidth, height: size * 0.045, borderRadius: size * 0.025 }]} />
+        <View style={[iconStyles.line, { width: lineWidth, height: size * 0.045, borderRadius: size * 0.025 }]} />
+        <View
+          style={[iconStyles.line, { width: shortLineWidth, height: size * 0.045, borderRadius: size * 0.025 }]}
+        />
+      </View>
+    </View>
+  );
+}
+
 export default function AdminDashboard() {
+  const router = useRouter();
   const { adminStats, pendingApprovals, todayShifts, peopleOnLeaveToday, allEmployees } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
@@ -34,8 +64,20 @@ export default function AdminDashboard() {
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
     >
-      <Text style={[styles.title, { color: colors.text }]}>Clinic Dashboard</Text>
-      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{todayLabel}</Text>
+      <View style={styles.headerRow}>
+        <View style={styles.headerText}>
+          <Text style={[styles.title, { color: colors.text }]}>Dashboard</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{todayLabel}</Text>
+        </View>
+        <Pressable
+          onPress={() => router.push('/admin/chat' as Href)}
+          style={styles.messageBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Broadcast message"
+        >
+          <MessagesAppIcon size={48} />
+        </Pressable>
+      </View>
 
       <View style={styles.stats}>
         <StatCard label="Doctors" value={String(adminStats.totalSupervisors)} accent="#0F766E" compact centered />
@@ -123,8 +165,19 @@ export default function AdminDashboard() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 20 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 16,
+  },
+  headerText: { flex: 1 },
   title: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
-  subtitle: { fontSize: 13, marginBottom: 16, marginTop: 2 },
+  subtitle: { fontSize: 13, marginTop: 2 },
+  messageBtn: {
+    marginTop: 2,
+  },
   stats: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   actions: { gap: 10, marginVertical: 16 },
   actionBtn: { width: '100%' },
@@ -134,4 +187,42 @@ const styles = StyleSheet.create({
   meta: { fontSize: 12, marginTop: 4 },
   reason: { fontSize: 13, marginTop: 6 },
   empty: { textAlign: 'center', padding: 12 },
+});
+
+const iconStyles = StyleSheet.create({
+  circle: {
+    backgroundColor: MESSAGE_BLUE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: MESSAGE_BLUE,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  bubble: {
+    backgroundColor: '#FFFFFF',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
+    position: 'relative',
+  },
+  tail: {
+    position: 'absolute',
+    left: -4,
+    bottom: 4,
+    width: 0,
+    height: 0,
+    borderTopColor: 'transparent',
+    borderRightColor: '#FFFFFF',
+    borderBottomColor: 'transparent',
+    borderLeftColor: 'transparent',
+    borderStyle: 'solid',
+    transform: [{ rotate: '-18deg' }],
+  },
+  line: {
+    backgroundColor: LINE_BLUE,
+  },
 });

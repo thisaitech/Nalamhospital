@@ -6,8 +6,10 @@ import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
+import { MobileWebFrame } from '@/components/MobileWebFrame';
 import { AppProvider, useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
+import { initFirebaseAnalytics } from '@/services/firebase';
 import '@/services/firebase';
 
 export { ErrorBoundary } from 'expo-router';
@@ -29,7 +31,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     const root = segments[0];
     const inAuth = root === 'login';
     const inAdmin = root === 'admin';
-    const employeeRoutes = ['(tabs)', 'profile', 'leave-request', 'punch'];
+    const employeeRoutes = ['(tabs)', 'profile', 'leave-request', 'punch', 'announcement'];
     const inEmployee = employeeRoutes.includes(root as string);
 
     if (!isAuthenticated && !inAuth) {
@@ -63,6 +65,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+    ionicons: require('../assets/fonts/Ionicons.ttf'),
   });
 
   useEffect(() => {
@@ -86,6 +89,10 @@ function RootLayoutNav() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
+  useEffect(() => {
+    initFirebaseAnalytics().catch(() => {});
+  }, []);
+
   const theme = colorScheme === 'dark' ? DarkTheme : DefaultTheme;
   const customTheme = {
     ...theme,
@@ -101,16 +108,19 @@ function RootLayoutNav() {
 
   return (
     <ThemeProvider value={customTheme}>
-      <AuthGate>
-        <Stack>
-          <Stack.Screen name="login" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="admin" options={{ headerShown: false }} />
-          <Stack.Screen name="profile" options={{ title: 'Edit Profile', headerBackTitle: 'Back' }} />
-          <Stack.Screen name="leave-request" options={{ presentation: 'modal', title: 'Request Leave' }} />
-          <Stack.Screen name="punch" options={{ presentation: 'modal', headerShown: false }} />
-        </Stack>
-      </AuthGate>
+      <MobileWebFrame>
+        <AuthGate>
+          <Stack>
+            <Stack.Screen name="login" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="admin" options={{ headerShown: false }} />
+            <Stack.Screen name="profile" options={{ title: 'Edit Profile', headerBackTitle: 'Back' }} />
+            <Stack.Screen name="leave-request" options={{ presentation: 'modal', title: 'Request Leave' }} />
+            <Stack.Screen name="announcement" options={{ presentation: 'modal', title: 'Admin Message' }} />
+            <Stack.Screen name="punch" options={{ presentation: 'modal', headerShown: false }} />
+          </Stack>
+        </AuthGate>
+      </MobileWebFrame>
     </ThemeProvider>
   );
 }

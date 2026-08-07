@@ -1,5 +1,16 @@
+import { useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { format, isValid, parseISO } from 'date-fns';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { formatDateInput } from '@/utils/leaveValidation';
 
@@ -16,10 +27,19 @@ interface DateInputFieldProps {
   cardColor: string;
   dangerColor: string;
   primaryColor: string;
+  compact?: boolean;
 }
 
 function sanitizeDateInput(text: string): string {
   return formatDateInput(text);
+}
+
+function parseDateValue(value: string): Date {
+  if (value.length >= 10) {
+    const parsed = parseISO(value);
+    if (isValid(parsed)) return parsed;
+  }
+  return new Date();
 }
 
 export function DateInputField({
@@ -35,8 +55,12 @@ export function DateInputField({
   cardColor,
   dangerColor,
   primaryColor,
+  compact = false,
 }: DateInputFieldProps) {
   const hasError = Boolean(error);
+  const [showPicker, setShowPicker] = useState(false);
+  const [draftDate, setDraftDate] = useState(() => parseDateValue(value));
+  const webDateRef = useRef<HTMLInputElement | null>(null);
 
   const fieldStyle = [
     styles.fieldWrap,
@@ -47,12 +71,73 @@ export function DateInputField({
     },
   ];
 
+  const openPicker = () => {
+    setDraftDate(parseDateValue(value));
+    if (Platform.OS === 'web') {
+      const input = webDateRef.current;
+      if (!input) return;
+      if (typeof input.showPicker === 'function') {
+        input.showPicker();
+      } else {
+        input.click();
+      }
+      return;
+    }
+    setShowPicker(true);
+  };
+
+  const applyPickedDate = (date: Date) => {
+    onChange(format(date, 'yyyy-MM-dd'));
+    setShowPicker(false);
+  };
+
+  const handleNativeChange = (event: DateTimePickerEvent, date?: Date) => {
+    if (event.type === 'dismissed') {
+      setShowPicker(false);
+      return;
+    }
+    if (Platform.OS === 'android' && date) {
+      applyPickedDate(date);
+      return;
+    }
+    if (date) setDraftDate(date);
+  };
+
+  const calendarIcon = (
+    <Pressable
+      onPress={openPicker}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={`Choose ${label}`}
+      style={styles.iconBtn}
+    >
+      <Ionicons name="calendar-outline" size={20} color={hasError ? dangerColor : primaryColor} />
+    </Pressable>
+  );
+
   if (Platform.OS === 'web') {
     return (
       <View>
-        <Text style={[styles.label, { color: mutedColor }]}>{label}</Text>
+        <Text style={[styles.label, compact && styles.labelCompact, { color: mutedColor }]}>{label}</Text>
         <View style={fieldStyle}>
-          <Ionicons name="calendar-outline" size={20} color={hasError ? dangerColor : primaryColor} />
+          {calendarIcon}
+          <input
+            ref={webDateRef}
+            type="date"
+            aria-hidden
+            tabIndex={-1}
+            value={value.length >= 10 ? value : ''}
+            onChange={(event) => {
+              if (event.target.value) onChange(event.target.value);
+            }}
+            style={{
+              position: 'absolute',
+              opacity: 0,
+              width: 0,
+              height: 0,
+              pointerEvents: 'none',
+            }}
+          />
           <input
             type="text"
             inputMode="numeric"
@@ -86,9 +171,9 @@ export function DateInputField({
 
   return (
     <View>
-      <Text style={[styles.label, { color: mutedColor }]}>{label}</Text>
+      <Text style={[styles.label, compact && styles.labelCompact, { color: mutedColor }]}>{label}</Text>
       <View style={fieldStyle}>
-        <Ionicons name="calendar-outline" size={20} color={hasError ? dangerColor : primaryColor} />
+        {calendarIcon}
         <TextInput
           style={[styles.input, { color: textColor }]}
           value={value}
@@ -104,6 +189,39 @@ export function DateInputField({
         />
       </View>
       {hasError ? <Text style={[styles.error, { color: dangerColor }]}>{error}</Text> : null}
+
+      {Platform.OS === 'android' && showPicker ? (
+        <DateTimePicker
+          value={draftDate}
+          mode="date"
+          display="default"
+          onChange={handleNativeChange}
+        />
+      ) : null}
+
+      {Platform.OS === 'ios' ? (
+        <Modal visible={showPicker} transparent animationType="slide" onRequestClose={() => setShowPicker(false)}>
+          <Pressable style={styles.overlay} onPress={() => setShowPicker(false)} />
+          <View style={[styles.sheet, { backgroundColor: cardColor, borderColor }]}>
+            <View style={[styles.sheetHeader, { borderBottomColor: borderColor }]}>
+              <Pressable onPress={() => setShowPicker(false)} hitSlop={12}>
+                <Text style={[styles.sheetAction, { color: mutedColor }]}>Cancel</Text>
+              </Pressable>
+              <Text style={[styles.sheetTitle, { color: textColor }]}>{label}</Text>
+              <Pressable onPress={() => applyPickedDate(draftDate)} hitSlop={12}>
+                <Text style={[styles.sheetAction, { color: primaryColor, fontWeight: '700' }]}>Done</Text>
+              </Pressable>
+            </View>
+            <DateTimePicker
+              value={draftDate}
+              mode="date"
+              display="spinner"
+              onChange={handleNativeChange}
+              themeVariant="light"
+            />
+          </View>
+        </Modal>
+      ) : null}
     </View>
   );
 }
@@ -115,6 +233,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 16,
   },
+  labelCompact: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 0,
+    marginBottom: 4,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
   fieldWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -122,6 +248,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     minHeight: 48,
     gap: 10,
+  },
+  iconBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   input: {
     flex: 1,
@@ -133,5 +263,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginTop: 6,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  sheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopWidth: 1,
+    paddingBottom: 24,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  sheetTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  sheetAction: {
+    fontSize: 15,
+    fontWeight: '600',
+    minWidth: 56,
   },
 });

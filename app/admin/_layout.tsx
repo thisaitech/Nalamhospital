@@ -118,6 +118,21 @@ export default function AdminLayout() {
             headerShown: false,
           }}
         />
+        <Tabs.Screen
+          name="latecomers"
+          options={{
+            href: null,
+            headerShown: true,
+          }}
+        />
+        <Tabs.Screen
+          name="chat"
+          options={{
+            href: null,
+            headerShown: true,
+            title: 'Broadcast',
+          }}
+        />
       </Tabs>
     </>
   );

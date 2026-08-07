@@ -43,3 +43,9 @@ yarn-error.*
 
 # release APKs (large binaries — keep local only)
 releases/*.apk
+
+# local tooling / build caches
+.firebase/
+.gradle/
+.agents/
+skills-lock.json

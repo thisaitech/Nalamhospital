@@ -23,8 +23,24 @@ export const PAID_LEAVE_QUOTA = {
   staff: 4,
 } as const;
 
-export const DEFAULT_DAY_SHIFT = { start: '09:00', end: '17:00' };
-export const DEFAULT_NIGHT_SHIFT = { start: '21:00', end: '05:00' };
+/** Clinic standard shifts: 8 AM–8 PM and 8 PM–8 AM. */
+export const DEFAULT_DAY_SHIFT = { start: '08:00', end: '20:00' };
+export const DEFAULT_NIGHT_SHIFT = { start: '20:00', end: '08:00' };
+
+/**
+ * On admin-selected shift-change days:
+ * - Night team works a temporary morning window: 8 PM → 1 PM
+ * - Day team works a temporary night window: 1 PM → 8 AM
+ */
+export const SHIFT_CHANGE_DAY_TIMING = { start: '20:00', end: '13:00' };
+export const SHIFT_CHANGE_NIGHT_TIMING = { start: '13:00', end: '08:00' };
+
+export const DEFAULT_SHIFT_CHANGE_TIMINGS = {
+  nightStart: SHIFT_CHANGE_DAY_TIMING.start,
+  nightEnd: SHIFT_CHANGE_DAY_TIMING.end,
+  dayStart: SHIFT_CHANGE_NIGHT_TIMING.start,
+  dayEnd: SHIFT_CHANGE_NIGHT_TIMING.end,
+} as const;
 
 export const INITIAL_USERS: AppUser[] = [
   {

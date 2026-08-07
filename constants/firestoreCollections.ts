@@ -6,9 +6,11 @@ export const FIRESTORE_COLLECTIONS = {
   ATTENDANCE: 'attendance',
   LEAVE_REQUESTS: 'leaveRequests',
   CHAT_MESSAGES: 'chatMessages',
+  NOTIFICATIONS: 'notifications',
   SALARY_SLIPS: 'salarySlips',
   PERFORMANCE_REVIEWS: 'performanceReviews',
   SHIFT_ASSIGNMENTS: 'shiftAssignments',
+  CLINIC_SETTINGS: 'clinicSettings',
 } as const;
 
 /** Bump to force clinic HR seed on next app start when prior seed exists. */

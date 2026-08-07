@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import {
-  Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -27,6 +25,7 @@ interface SelectFieldProps {
   dangerColor: string;
   primaryColor: string;
   compact?: boolean;
+  hideLeadingIcon?: boolean;
 }
 
 export function SelectField({
@@ -44,6 +43,7 @@ export function SelectField({
   dangerColor,
   primaryColor,
   compact = false,
+  hideLeadingIcon = false,
 }: SelectFieldProps) {
   const [open, setOpen] = useState(false);
   const hasError = Boolean(error);
@@ -62,11 +62,15 @@ export function SelectField({
   if (Platform.OS === 'web') {
     return (
       <View>
-        <Text style={[styles.label, compact && styles.labelCompact, { color: mutedColor }]}>{label}</Text>
+        {label ? (
+          <Text style={[styles.label, compact && styles.labelCompact, { color: mutedColor }]}>{label}</Text>
+        ) : null}
         <View style={fieldStyle}>
-          <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : primaryColor} />
+          {!hideLeadingIcon ? (
+            <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : primaryColor} />
+          ) : null}
           <select
-            aria-label={label}
+            aria-label={label || placeholder}
             aria-invalid={hasError}
             disabled={disabled}
             value={value}
@@ -82,6 +86,9 @@ export function SelectField({
               fontWeight: 500,
               fontFamily: 'inherit',
               padding: '12px 0',
+              ...(hideLeadingIcon
+                ? { appearance: 'none' as const, WebkitAppearance: 'none' as const }
+                : {}),
             }}
           >
             <option value="">{placeholder}</option>
@@ -91,6 +98,9 @@ export function SelectField({
               </option>
             ))}
           </select>
+          {hideLeadingIcon ? (
+            <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : primaryColor} />
+          ) : null}
         </View>
         {hasError ? <Text style={[styles.error, { color: dangerColor }]}>{error}</Text> : null}
       </View>
@@ -98,58 +108,76 @@ export function SelectField({
   }
 
   return (
-    <View>
-      <Text style={[styles.label, compact && styles.labelCompact, { color: mutedColor }]}>{label}</Text>
+    <View style={open ? styles.openWrap : undefined}>
+      {label ? (
+        <Text style={[styles.label, compact && styles.labelCompact, { color: mutedColor }]}>{label}</Text>
+      ) : null}
       <Pressable
-        onPress={() => !disabled && setOpen(true)}
+        onPress={() => !disabled && setOpen((prev) => !prev)}
         style={fieldStyle}
         accessibilityRole="button"
-        accessibilityLabel={label}
+        accessibilityLabel={label || placeholder}
       >
-        <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : primaryColor} />
+        {!hideLeadingIcon ? (
+          <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : primaryColor} />
+        ) : null}
         <Text style={[styles.valueText, { color: selected ? textColor : mutedColor }]}>
           {selected?.label ?? placeholder}
         </Text>
+        {hideLeadingIcon ? (
+          <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : primaryColor} />
+        ) : null}
       </Pressable>
-      {hasError ? <Text style={[styles.error, { color: dangerColor }]}>{error}</Text> : null}
 
-      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.overlay} onPress={() => setOpen(false)} />
-        <View style={[styles.sheet, { backgroundColor: cardColor, borderColor }]}>
-          <View style={[styles.sheetHeader, { borderBottomColor: borderColor }]}>
-            <Text style={[styles.sheetTitle, { color: textColor }]}>{label}</Text>
-            <Pressable onPress={() => setOpen(false)} hitSlop={12}>
-              <Ionicons name="close" size={24} color={mutedColor} />
+      {open ? (
+        <View
+          style={[
+            styles.dropdown,
+            {
+              backgroundColor: cardColor,
+              borderColor: hasError ? dangerColor : borderColor,
+            },
+          ]}
+        >
+          {placeholder ? (
+            <Pressable
+              onPress={() => {
+                onChange('');
+                setOpen(false);
+              }}
+              style={[styles.option, { borderBottomColor: borderColor }]}
+            >
+              <Text style={[styles.optionText, { color: mutedColor }]}>{placeholder}</Text>
             </Pressable>
-          </View>
-          <ScrollView>
-            {options.map((option) => {
-              const active = option.value === value;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => {
-                    onChange(option.value);
-                    setOpen(false);
-                  }}
-                  style={[
-                    styles.option,
-                    {
-                      backgroundColor: active ? `${primaryColor}14` : 'transparent',
-                      borderBottomColor: borderColor,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.optionText, { color: active ? primaryColor : textColor }]}>
-                    {option.label}
-                  </Text>
-                  {active ? <Ionicons name="checkmark" size={18} color={primaryColor} /> : null}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          ) : null}
+          {options.map((option) => {
+            const active = option.value === value;
+            return (
+              <Pressable
+                key={option.value}
+                onPress={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                style={[
+                  styles.option,
+                  {
+                    backgroundColor: active ? `${primaryColor}14` : 'transparent',
+                    borderBottomColor: borderColor,
+                  },
+                ]}
+              >
+                <Text style={[styles.optionText, { color: active ? primaryColor : textColor }]}>
+                  {option.label}
+                </Text>
+                {active ? <Ionicons name="checkmark" size={18} color={primaryColor} /> : null}
+              </Pressable>
+            );
+          })}
         </View>
-      </Modal>
+      ) : null}
+
+      {hasError ? <Text style={[styles.error, { color: dangerColor }]}>{error}</Text> : null}
     </View>
   );
 }
@@ -188,34 +216,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 6,
   },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  openWrap: {
+    zIndex: 20,
   },
-  sheet: {
-    maxHeight: '55%',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderTopWidth: 1,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-  },
-  sheetTitle: {
-    fontSize: 17,
-    fontWeight: '700',
+  dropdown: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   optionText: {
