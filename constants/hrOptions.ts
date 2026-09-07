@@ -51,6 +51,7 @@ export const STAFF_CATEGORY_OPTIONS: SelectOption[] = [
 export const SHIFT_TYPE_OPTIONS: SelectOption[] = [
   { value: 'day', label: 'Day Shift' },
   { value: 'night', label: 'Night Shift' },
+  { value: '24h', label: '24 Hours' },
 ];
 
 export function buildJoinDateOptions(pastDays = 3650, futureDays = 365): SelectOption[] {

@@ -8,10 +8,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '@/constants/Colors';
 import { TAB_NAV_ICONS, TAB_COLORS, type TabPictureKey } from '@/constants/tabPictures';
 import { useColorScheme } from '@/components/useColorScheme';
+import { useApp } from '@/contexts/AppContext';
 
 const ROUTE_TO_TAB: Record<string, TabPictureKey> = {
   index: 'home',
   attendance: 'time',
+  calendar: 'calendar',
   leave: 'leave',
   salary: 'pay',
 };
@@ -20,11 +22,16 @@ type PremiumTabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['ta
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
 export function PremiumTabBar({ state, descriptors, navigation }: PremiumTabBarProps) {
+  const { employee, isAdmin } = useApp();
+  const isDoctor = employee?.staffCategory === 'doctor';
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const insets = useSafeAreaInsets();
   const isDark = scheme === 'dark';
-  const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 20 : 12);
+  const bottomInset = Math.max(
+    insets.bottom,
+    Platform.select({ android: 20, web: 24, default: 12 }) ?? 12
+  );
 
   return (
     <View
@@ -48,7 +55,12 @@ export function PremiumTabBar({ state, descriptors, navigation }: PremiumTabBarP
       >
         {state.routes
           .map((route, index) => ({ route, index }))
-          .filter(({ route }) => descriptors[route.key].options.href !== null)
+          .filter(({ route }) => {
+            // Calendar: doctors only (never staff). Admins use /admin, not this bar.
+            if (route.name === 'calendar') return isDoctor && !isAdmin;
+            const href = descriptors[route.key]?.options?.href;
+            return href !== null;
+          })
           .map(({ route, index }) => {
           const focused = state.index === index;
           const tabKey = ROUTE_TO_TAB[route.name] ?? 'home';

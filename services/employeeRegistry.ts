@@ -1,5 +1,6 @@
 import {
   DEFAULT_DAY_SHIFT,
+  DEFAULT_FULL_DAY_SHIFT,
   DEFAULT_NIGHT_SHIFT,
 } from '@/constants/config';
 import {
@@ -9,8 +10,10 @@ import {
   loadUsers as loadUsersFromFirestore,
   saveEmployees as saveEmployeesToFirestore,
   saveUsers as saveUsersToFirestore,
+  loadClinics as loadClinicsFromFirestore,
 } from '@/services/firestoreRepository';
 import { defaultBalancesForCategory } from '@/utils/clinicLeave';
+import { DEFAULT_CLINIC_ID } from '@/types/clinic';
 import type {
   AppUser,
   Employee,
@@ -30,6 +33,10 @@ export async function saveEmployees(employees: Employee[]): Promise<void> {
 
 export async function loadUsers(): Promise<AppUser[]> {
   return loadUsersFromFirestore();
+}
+
+export async function loadClinics() {
+  return loadClinicsFromFirestore();
 }
 
 export async function saveUsers(users: AppUser[]): Promise<void> {
@@ -76,11 +83,16 @@ export async function createNewHire(input: NewHireInput): Promise<Employee> {
     throw new Error('An account with this email already exists.');
   }
 
-  const dayShiftEnabled = input.dayShiftEnabled || (!input.dayShiftEnabled && !input.nightShiftEnabled);
-  const nightShiftEnabled = input.nightShiftEnabled;
+  const dayShiftEnabled = input.is24HourDuty
+    ? true
+    : input.dayShiftEnabled || (!input.dayShiftEnabled && !input.nightShiftEnabled);
+  const nightShiftEnabled = input.is24HourDuty ? false : input.nightShiftEnabled;
   const password = input.tempPassword?.trim() || 'welcome123';
   const employeeId = nextEmployeeId(employees);
   const staffCategory = input.staffCategory ?? 'staff';
+  const clinicId = input.clinicId?.trim() || DEFAULT_CLINIC_ID;
+  const clinics = await loadClinics();
+  const clinic = clinics.find((c) => c.id === clinicId);
   const employee: Employee = {
     id: String(Date.now()),
     employeeId,
@@ -99,10 +111,17 @@ export async function createNewHire(input: NewHireInput): Promise<Employee> {
     busFare: Number(input.busFare) || 0,
     dayShiftEnabled,
     nightShiftEnabled,
-    dayShiftStart: input.dayShiftStart || DEFAULT_DAY_SHIFT.start,
-    dayShiftEnd: input.dayShiftEnd || DEFAULT_DAY_SHIFT.end,
+    is24HourDuty: !!input.is24HourDuty,
+    dayShiftStart: input.is24HourDuty
+      ? DEFAULT_FULL_DAY_SHIFT.start
+      : input.dayShiftStart || DEFAULT_DAY_SHIFT.start,
+    dayShiftEnd: input.is24HourDuty
+      ? DEFAULT_FULL_DAY_SHIFT.end
+      : input.dayShiftEnd || DEFAULT_DAY_SHIFT.end,
     nightShiftStart: input.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
     nightShiftEnd: input.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
+    clinicId,
+    clinicName: clinic?.name,
   };
 
   const user: AppUser = {
@@ -117,6 +136,81 @@ export async function createNewHire(input: NewHireInput): Promise<Employee> {
 
   await createNewHireRecords(employee, user, defaultBalances);
   return employee;
+}
+
+export async function updateNewHire(employeeId: string, input: NewHireInput): Promise<Employee> {
+  const employees = await loadEmployees();
+  const users = await loadUsers();
+  const employee = employees.find((e) => e.employeeId === employeeId);
+  if (!employee) {
+    throw new Error('Employee not found');
+  }
+
+  const supervisor = employees.find((e) => e.employeeId === input.supervisorId);
+  const managerName = supervisor ? getEmployeeDisplayName(supervisor) : employee.manager || 'Clinic Admin';
+
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const existingUser = users.find((u) => u.employeeId === employeeId);
+  if (!existingUser) {
+    throw new Error('Login account not found for this employee.');
+  }
+  if (
+    normalizedEmail !== employee.email.toLowerCase() &&
+    users.some((u) => u.email.toLowerCase() === normalizedEmail && u.employeeId !== employeeId)
+  ) {
+    throw new Error('An account with this email already exists.');
+  }
+
+  const dayShiftEnabled = input.is24HourDuty
+    ? true
+    : input.dayShiftEnabled || (!input.dayShiftEnabled && !input.nightShiftEnabled);
+  const nightShiftEnabled = input.is24HourDuty ? false : input.nightShiftEnabled;
+  const clinicId = input.clinicId?.trim() || employee.clinicId || DEFAULT_CLINIC_ID;
+  const clinics = await loadClinics();
+  const clinic = clinics.find((c) => c.id === clinicId);
+  const staffCategory = input.staffCategory ?? employee.staffCategory ?? 'staff';
+  const password = input.tempPassword?.trim();
+
+  const updated: Employee = {
+    ...employee,
+    firstName: input.firstName.trim(),
+    lastName: input.lastName.trim(),
+    email: normalizedEmail,
+    phone: input.phone.trim(),
+    department: input.department.trim() || 'General',
+    position: input.position.trim() || (staffCategory === 'doctor' ? 'Doctor' : 'Staff'),
+    manager: managerName,
+    joinDate: input.joinDate || employee.joinDate,
+    address: input.address.trim(),
+    emergencyContact: input.emergencyContact.trim(),
+    staffCategory,
+    baseSalary: Number(input.baseSalary) || 0,
+    busFare: Number(input.busFare) || 0,
+    dayShiftEnabled,
+    nightShiftEnabled,
+    is24HourDuty: !!input.is24HourDuty,
+    dayShiftStart: input.is24HourDuty
+      ? DEFAULT_FULL_DAY_SHIFT.start
+      : input.dayShiftStart || DEFAULT_DAY_SHIFT.start,
+    dayShiftEnd: input.is24HourDuty
+      ? DEFAULT_FULL_DAY_SHIFT.end
+      : input.dayShiftEnd || DEFAULT_DAY_SHIFT.end,
+    nightShiftStart: input.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
+    nightShiftEnd: input.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
+    clinicId,
+    clinicName: clinic?.name,
+  };
+
+  const updatedUser: AppUser = {
+    ...existingUser,
+    email: normalizedEmail,
+    name: getEmployeeDisplayName(updated),
+    ...(password ? { password } : {}),
+  };
+
+  await saveEmployees(employees.map((e) => (e.employeeId === employeeId ? updated : e)));
+  await saveUsers(users.map((u) => (u.employeeId === employeeId ? updatedUser : u)));
+  return updated;
 }
 
 export async function registerEmployee(input: RegisterInput): Promise<Employee> {
@@ -156,6 +250,7 @@ export async function registerEmployee(input: RegisterInput): Promise<Employee> 
     dayShiftEnd: DEFAULT_DAY_SHIFT.end,
     nightShiftStart: DEFAULT_NIGHT_SHIFT.start,
     nightShiftEnd: DEFAULT_NIGHT_SHIFT.end,
+    clinicId: DEFAULT_CLINIC_ID,
   });
 }
 
@@ -193,7 +288,24 @@ export async function updateEmployeeProfile(
 
 export async function updateEmployeePayrollFields(
   employeeId: string,
-  fields: Partial<Pick<Employee, 'baseSalary' | 'busFare' | 'dayShiftEnabled' | 'nightShiftEnabled' | 'dayShiftStart' | 'dayShiftEnd' | 'nightShiftStart' | 'nightShiftEnd' | 'staffCategory'>>
+  fields: Partial<
+    Pick<
+      Employee,
+      | 'baseSalary'
+      | 'busFare'
+      | 'salaryType'
+      | 'hourlyRate'
+      | 'otMultiplier'
+      | 'dayShiftEnabled'
+      | 'nightShiftEnabled'
+      | 'dayShiftStart'
+      | 'dayShiftEnd'
+      | 'nightShiftStart'
+      | 'nightShiftEnd'
+      | 'is24HourDuty'
+      | 'staffCategory'
+    >
+  >
 ): Promise<Employee> {
   const employees = await loadEmployees();
   const employee = employees.find((e) => e.employeeId === employeeId);
@@ -216,7 +328,7 @@ export async function assignSupervisor(employeeId: string, supervisorId: string)
 }
 
 export async function getSupervisorOptions(): Promise<Employee[]> {
-  const employees = await loadEmployees();
+  const employees = (await loadEmployees()).filter((e) => !e.deletedAt);
   const managers = employees.filter((employee) =>
     /manager|supervisor|lead|director|head|consultant/i.test(employee.position)
   );
@@ -229,4 +341,32 @@ export async function getSupervisorOptions(): Promise<Employee[]> {
   );
   const combined = [...new Map([...managers, ...withReports].map((e) => [e.employeeId, e])).values()];
   return combined.length > 0 ? combined : employees;
+}
+
+/** Soft-delete: hide from active lists but keep all details. */
+export async function softDeleteEmployee(employeeId: string): Promise<Employee> {
+  const employees = await loadEmployees();
+  const employee = employees.find((e) => e.employeeId === employeeId);
+  if (!employee) throw new Error('Employee not found');
+  if (employee.deletedAt) throw new Error('This person is already in Deleted staff.');
+  const updated: Employee = {
+    ...employee,
+    deletedAt: new Date().toISOString(),
+  };
+  await saveEmployees(employees.map((e) => (e.employeeId === employeeId ? updated : e)));
+  return updated;
+}
+
+/** Restore a soft-deleted employee back to active Staff. */
+export async function restoreEmployee(employeeId: string): Promise<Employee> {
+  const employees = await loadEmployees();
+  const employee = employees.find((e) => e.employeeId === employeeId);
+  if (!employee) throw new Error('Employee not found');
+  if (!employee.deletedAt) throw new Error('This person is not deleted.');
+  const updated: Employee = {
+    ...employee,
+    deletedAt: null,
+  };
+  await saveEmployees(employees.map((e) => (e.employeeId === employeeId ? updated : e)));
+  return updated;
 }

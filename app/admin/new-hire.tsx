@@ -10,12 +10,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { Button } from '@/components/ui/Button';
 import { DateInputField } from '@/components/ui/DateInputField';
 import { SelectField } from '@/components/ui/SelectField';
-import { getEmployeeDisplayName } from '@/services/employeeRegistry';
+import { getEmployeeDisplayName, findEmployeeById } from '@/services/employeeRegistry';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
 import {
@@ -23,11 +23,12 @@ import {
   DEFAULT_NIGHT_SHIFT,
 } from '@/constants/config';
 import {
-  buildTimeOptions,
   DEPARTMENT_OPTIONS,
   POSITIONS_BY_DEPARTMENT,
   STAFF_CATEGORY_OPTIONS,
+  buildTimeOptions,
 } from '@/constants/hrOptions';
+import { getNormalShiftTimings } from '@/services/shiftService';
 import type { Employee, StaffCategory } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
 import { parseLeaveDate } from '@/utils/leaveValidation';
@@ -57,14 +58,21 @@ const TEXT_FIELDS: {
 
 export default function NewHireScreen() {
   const router = useRouter();
-  const { createHire, getSupervisors } = useApp();
+  const { employeeId: editEmployeeId } = useLocalSearchParams<{ employeeId?: string }>();
+  const isEditMode = typeof editEmployeeId === 'string' && editEmployeeId.length > 0;
+  const { createHire, updateHire, getSupervisors, allClinics, selectedClinicId } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const [supervisors, setSupervisors] = useState<Employee[]>([]);
   const [supervisorId, setSupervisorId] = useState('');
+  const [clinicId, setClinicId] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [loadingEmployee, setLoadingEmployee] = useState(false);
 
-  const timeOptions = useMemo(() => buildTimeOptions(30), []);
+  const clinicOptions = useMemo(
+    () => allClinics.map((clinic) => ({ label: clinic.name, value: clinic.id })),
+    [allClinics]
+  );
 
   const [form, setForm] = useState({
     firstName: '',
@@ -82,18 +90,108 @@ export default function NewHireScreen() {
     busFare: '',
     dayShiftEnabled: true,
     nightShiftEnabled: false,
+    is24HourDuty: false,
     dayShiftStart: DEFAULT_DAY_SHIFT.start,
     dayShiftEnd: DEFAULT_DAY_SHIFT.end,
     nightShiftStart: DEFAULT_NIGHT_SHIFT.start,
     nightShiftEnd: DEFAULT_NIGHT_SHIFT.end,
   });
 
+  const timeOptions = useMemo(() => buildTimeOptions(), []);
+
   useEffect(() => {
     getSupervisors().then((list) => {
       setSupervisors(list);
-      if (list[0]) setSupervisorId(list[0].employeeId);
+      if (!isEditMode && list[0]) setSupervisorId(list[0].employeeId);
     });
-  }, [getSupervisors]);
+  }, [getSupervisors, isEditMode]);
+
+  useEffect(() => {
+    if (isEditMode) return;
+    getNormalShiftTimings()
+      .then((timings) => {
+        setForm((prev) => ({
+          ...prev,
+          dayShiftStart: timings.dayStart,
+          dayShiftEnd: timings.dayEnd,
+          nightShiftStart: timings.nightStart,
+          nightShiftEnd: timings.nightEnd,
+        }));
+      })
+      .catch(() => {
+        // keep defaults
+      });
+  }, [isEditMode]);
+
+  useEffect(() => {
+    if (!isEditMode || !editEmployeeId) return;
+    let cancelled = false;
+    setLoadingEmployee(true);
+    findEmployeeById(editEmployeeId)
+      .then((emp) => {
+        if (cancelled || !emp) return;
+        setForm({
+          firstName: emp.firstName ?? '',
+          lastName: emp.lastName ?? '',
+          email: emp.email ?? '',
+          phone: emp.phone ?? '',
+          department: emp.department ?? '',
+          position: emp.position ?? '',
+          address: emp.address ?? '',
+          emergencyContact: emp.emergencyContact ?? '',
+          joinDate: emp.joinDate ?? new Date().toISOString().split('T')[0],
+          tempPassword: '',
+          staffCategory: emp.staffCategory ?? 'staff',
+          baseSalary: emp.baseSalary != null ? String(emp.baseSalary) : '',
+          busFare: emp.busFare != null ? String(emp.busFare) : '',
+          dayShiftEnabled: emp.is24HourDuty
+            ? true
+            : Boolean(emp.dayShiftEnabled) || !emp.nightShiftEnabled,
+          nightShiftEnabled: emp.is24HourDuty
+            ? false
+            : Boolean(emp.nightShiftEnabled) && !emp.dayShiftEnabled,
+          is24HourDuty: emp.is24HourDuty ?? false,
+          dayShiftStart:
+            emp.dayShiftStart ||
+            (emp.is24HourDuty ? '08:00' : DEFAULT_DAY_SHIFT.start),
+          dayShiftEnd: emp.is24HourDuty
+            ? emp.dayShiftEnd && emp.dayShiftEnd !== emp.dayShiftStart
+              ? emp.dayShiftEnd
+              : '10:00'
+            : emp.dayShiftEnd || DEFAULT_DAY_SHIFT.end,
+          nightShiftStart: emp.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
+          nightShiftEnd: emp.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
+        });
+        setClinicId(emp.clinicId ?? '');
+        getSupervisors().then((list) => {
+          if (cancelled) return;
+          const match = list.find(
+            (sup) => getEmployeeDisplayName(sup) === emp.manager || sup.employeeId === emp.manager
+          );
+          setSupervisorId(match?.employeeId ?? list[0]?.employeeId ?? '');
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingEmployee(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, editEmployeeId, getSupervisors]);
+
+  useEffect(() => {
+    if (allClinics.length === 0) {
+      setClinicId('');
+      return;
+    }
+    const preferred =
+      selectedClinicId !== 'all' && allClinics.some((clinic) => clinic.id === selectedClinicId)
+        ? selectedClinicId
+        : allClinics[0].id;
+    setClinicId((current) =>
+      current && allClinics.some((clinic) => clinic.id === current) ? current : preferred
+    );
+  }, [allClinics, selectedClinicId]);
 
   const positionOptions = useMemo(
     () => (form.department ? POSITIONS_BY_DEPARTMENT[form.department] ?? [] : []),
@@ -149,19 +247,30 @@ export default function NewHireScreen() {
       showAlert('Invalid join date', 'Enter join date as YYYY-MM-DD (past dates allowed).');
       return;
     }
+    if (!clinicId) {
+      showAlert('Missing clinic', 'Add a clinic on the Employees page first.');
+      return;
+    }
+    if (form.is24HourDuty && form.dayShiftStart.slice(0, 5) === form.dayShiftEnd.slice(0, 5)) {
+      showAlert(
+        'Present before required',
+        'For 24-hour doctors, set Present before to a time after Present from (e.g. 08:00 → 10:00).'
+      );
+      return;
+    }
 
     const joinDate =
       form.joinDate.length === 10 && parseLeaveDate(form.joinDate)
         ? form.joinDate
         : new Date().toISOString().split('T')[0];
 
-    const dayEnabled = form.dayShiftEnabled || (!form.dayShiftEnabled && !form.nightShiftEnabled);
-    const nightEnabled = form.nightShiftEnabled;
-    const password = form.tempPassword.trim() || 'welcome123';
+    const dayEnabled = form.is24HourDuty ? true : form.dayShiftEnabled;
+    const nightEnabled = form.is24HourDuty ? false : form.nightShiftEnabled;
+    const password = form.tempPassword.trim() || (isEditMode ? '' : 'welcome123');
 
     setSubmitting(true);
     try {
-      const created = await createHire({
+      const payload = {
         firstName: form.firstName,
         lastName: form.lastName,
         email: form.email,
@@ -178,18 +287,31 @@ export default function NewHireScreen() {
         busFare: Number(form.busFare) || 0,
         dayShiftEnabled: dayEnabled,
         nightShiftEnabled: nightEnabled,
+        is24HourDuty: form.is24HourDuty,
         dayShiftStart: form.dayShiftStart,
         dayShiftEnd: form.dayShiftEnd,
-        nightShiftStart: form.nightShiftStart,
-        nightShiftEnd: form.nightShiftEnd,
-      });
-      showAlert(
-        'Person added',
-        `${getEmployeeDisplayName(created)} added.\nLogin: ${created.email}\nTemp password: ${password}`,
-        () => router.replace('/admin/employees')
-      );
+        nightShiftStart: form.is24HourDuty ? form.dayShiftStart : form.nightShiftStart,
+        nightShiftEnd: form.is24HourDuty ? form.dayShiftEnd : form.nightShiftEnd,
+        clinicId,
+      };
+
+      if (isEditMode && editEmployeeId) {
+        const updated = await updateHire(editEmployeeId, payload);
+        showAlert(
+          'Staff updated',
+          `${getEmployeeDisplayName(updated)} has been updated.`,
+          () => router.replace('/admin/employees')
+        );
+      } else {
+        const created = await createHire(payload);
+        showAlert(
+          'Person added',
+          `${getEmployeeDisplayName(created)} added.\nLogin: ${created.email}\nTemp password: ${password}`,
+          () => router.replace('/admin/employees')
+        );
+      }
     } catch (e) {
-      showAlert('Error', e instanceof Error ? e.message : 'Could not create account');
+      showAlert('Error', e instanceof Error ? e.message : isEditMode ? 'Could not update staff' : 'Could not create account');
     } finally {
       setSubmitting(false);
     }
@@ -197,16 +319,29 @@ export default function NewHireScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Add Doctor / Staff', presentation: 'modal' }} />
+      <Stack.Screen
+        options={{
+          title: isEditMode ? 'Edit Doctor / Staff' : 'Add Doctor / Staff',
+          presentation: 'modal',
+        }}
+      />
       <KeyboardAvoidingView
         style={[styles.container, { backgroundColor: colors.background }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={[styles.title, { color: colors.text }]}>Add doctor or staff</Text>
-          <Text style={[styles.hint, { color: colors.textSecondary }]}>
-            Only name and email are required. Other fields are optional.
+          <Text style={[styles.title, { color: colors.text }]}>
+            {isEditMode ? 'Edit doctor or staff' : 'Add doctor or staff'}
           </Text>
+          <Text style={[styles.hint, { color: colors.textSecondary }]}>
+            {isEditMode
+              ? `Update details for ${editEmployeeId}. Leave password blank to keep the current one.`
+              : 'Only name and email are required. Other fields are optional.'}
+          </Text>
+
+          {loadingEmployee ? (
+            <Text style={[styles.hint, { color: colors.textMuted }]}>Loading staff details…</Text>
+          ) : null}
 
           <SelectField
             label="Category"
@@ -216,6 +351,21 @@ export default function NewHireScreen() {
             compact
             {...fieldColors}
           />
+
+          {clinicOptions.length > 0 ? (
+            <SelectField
+              label="Clinic *"
+              value={clinicId}
+              onChange={setClinicId}
+              options={clinicOptions}
+              compact
+              {...fieldColors}
+            />
+          ) : (
+            <Text style={[styles.hint, { color: colors.danger, marginBottom: 8 }]}>
+              No clinics yet. Go to Employees → Add clinic first.
+            </Text>
+          )}
 
           {TEXT_FIELDS.slice(0, 4).map((field) => (
             <View key={field.key} style={styles.fieldGroup}>
@@ -308,74 +458,167 @@ export default function NewHireScreen() {
               style={[
                 styles.toggle,
                 {
-                  backgroundColor: form.dayShiftEnabled ? colors.primaryLight : colors.card,
-                  borderColor: form.dayShiftEnabled ? colors.primary : colors.borderLight,
+                  backgroundColor:
+                    form.dayShiftEnabled && !form.is24HourDuty ? colors.primaryLight : colors.card,
+                  borderColor:
+                    form.dayShiftEnabled && !form.is24HourDuty ? colors.primary : colors.borderLight,
                 },
               ]}
-              onPress={() => update('dayShiftEnabled', !form.dayShiftEnabled)}
+              onPress={() =>
+                setForm((prev) => ({
+                  ...prev,
+                  is24HourDuty: false,
+                  dayShiftEnabled: true,
+                  nightShiftEnabled: false,
+                }))
+              }
             >
-              <Text style={{ color: colors.text, fontWeight: '700' }}>Day shift</Text>
+              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12 }}>Day shift</Text>
             </Pressable>
             <Pressable
               style={[
                 styles.toggle,
                 {
-                  backgroundColor: form.nightShiftEnabled ? colors.primaryLight : colors.card,
-                  borderColor: form.nightShiftEnabled ? colors.primary : colors.borderLight,
+                  backgroundColor:
+                    form.nightShiftEnabled && !form.is24HourDuty ? colors.primaryLight : colors.card,
+                  borderColor:
+                    form.nightShiftEnabled && !form.is24HourDuty ? colors.primary : colors.borderLight,
                 },
               ]}
-              onPress={() => update('nightShiftEnabled', !form.nightShiftEnabled)}
+              onPress={() =>
+                setForm((prev) => ({
+                  ...prev,
+                  is24HourDuty: false,
+                  dayShiftEnabled: false,
+                  nightShiftEnabled: true,
+                }))
+              }
             >
-              <Text style={{ color: colors.text, fontWeight: '700' }}>Night shift</Text>
+              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12 }}>Night shift</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.toggle,
+                {
+                  backgroundColor: form.is24HourDuty ? colors.primaryLight : colors.card,
+                  borderColor: form.is24HourDuty ? colors.primary : colors.borderLight,
+                },
+              ]}
+              onPress={() =>
+                setForm((prev) => ({
+                  ...prev,
+                  is24HourDuty: true,
+                  dayShiftEnabled: true,
+                  nightShiftEnabled: false,
+                  // Present window: from 08:00, must mark Present before 10:00 (admin can edit)
+                  dayShiftStart: '08:00',
+                  dayShiftEnd: '10:00',
+                  nightShiftStart: '08:00',
+                  nightShiftEnd: '10:00',
+                }))
+              }
+            >
+              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12 }}>24 hours</Text>
             </Pressable>
           </View>
 
-          {form.dayShiftEnabled ? (
-            <View style={styles.rowFields}>
-              <View style={styles.half}>
-                <SelectField
-                  label="Day start"
-                  value={form.dayShiftStart}
-                  options={timeOptions}
-                  onChange={(v) => update('dayShiftStart', v)}
-                  compact
-                  {...fieldColors}
-                />
-              </View>
-              <View style={styles.half}>
-                <SelectField
-                  label="Day end"
-                  value={form.dayShiftEnd}
-                  options={timeOptions}
-                  onChange={(v) => update('dayShiftEnd', v)}
-                  compact
-                  {...fieldColors}
-                />
+          {form.dayShiftEnabled && !form.is24HourDuty ? (
+            <View style={styles.timingBlock}>
+              <Text style={[styles.timingTitle, { color: colors.text }]}>Day shift timing</Text>
+              <View style={styles.timingRow}>
+                <View style={styles.timingHalf}>
+                  <SelectField
+                    label="Start"
+                    value={form.dayShiftStart}
+                    options={timeOptions}
+                    onChange={(v) => update('dayShiftStart', v)}
+                    compact
+                    hideLeadingIcon
+                    {...fieldColors}
+                  />
+                </View>
+                <View style={styles.timingHalf}>
+                  <SelectField
+                    label="End"
+                    value={form.dayShiftEnd}
+                    options={timeOptions}
+                    onChange={(v) => update('dayShiftEnd', v)}
+                    compact
+                    hideLeadingIcon
+                    {...fieldColors}
+                  />
+                </View>
               </View>
             </View>
           ) : null}
 
-          {form.nightShiftEnabled ? (
-            <View style={styles.rowFields}>
-              <View style={styles.half}>
-                <SelectField
-                  label="Night start"
-                  value={form.nightShiftStart}
-                  options={timeOptions}
-                  onChange={(v) => update('nightShiftStart', v)}
-                  compact
-                  {...fieldColors}
-                />
+          {form.nightShiftEnabled && !form.is24HourDuty ? (
+            <View style={styles.timingBlock}>
+              <Text style={[styles.timingTitle, { color: colors.text }]}>Night shift timing</Text>
+              <View style={styles.timingRow}>
+                <View style={styles.timingHalf}>
+                  <SelectField
+                    label="Start"
+                    value={form.nightShiftStart}
+                    options={timeOptions}
+                    onChange={(v) => update('nightShiftStart', v)}
+                    compact
+                    hideLeadingIcon
+                    {...fieldColors}
+                  />
+                </View>
+                <View style={styles.timingHalf}>
+                  <SelectField
+                    label="End"
+                    value={form.nightShiftEnd}
+                    options={timeOptions}
+                    onChange={(v) => update('nightShiftEnd', v)}
+                    compact
+                    hideLeadingIcon
+                    {...fieldColors}
+                  />
+                </View>
               </View>
-              <View style={styles.half}>
-                <SelectField
-                  label="Night end"
-                  value={form.nightShiftEnd}
-                  options={timeOptions}
-                  onChange={(v) => update('nightShiftEnd', v)}
-                  compact
-                  {...fieldColors}
-                />
+            </View>
+          ) : null}
+
+          {form.is24HourDuty ? (
+            <View style={styles.timingBlock}>
+              <View style={styles.timingRow}>
+                <View style={styles.timingHalf}>
+                  <SelectField
+                    label="Present from"
+                    value={form.dayShiftStart}
+                    options={timeOptions}
+                    onChange={(v) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        dayShiftStart: v,
+                        nightShiftStart: v,
+                      }))
+                    }
+                    compact
+                    hideLeadingIcon
+                    {...fieldColors}
+                  />
+                </View>
+                <View style={styles.timingHalf}>
+                  <SelectField
+                    label="Present before"
+                    value={form.dayShiftEnd}
+                    options={timeOptions}
+                    onChange={(v) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        dayShiftEnd: v,
+                        nightShiftEnd: v,
+                      }))
+                    }
+                    compact
+                    hideLeadingIcon
+                    {...fieldColors}
+                  />
+                </View>
               </View>
             </View>
           ) : null}
@@ -436,10 +679,10 @@ export default function NewHireScreen() {
           ) : null}
 
           <Button
-            title="Create account"
+            title={isEditMode ? 'Save changes' : 'Create account'}
             onPress={handleSubmit}
             loading={submitting}
-            disabled={submitting}
+            disabled={submitting || loadingEmployee}
             size="lg"
             style={styles.submit}
           />
@@ -463,6 +706,10 @@ const styles = StyleSheet.create({
   half: { flex: 1 },
   shiftToggles: { flexDirection: 'row', gap: 10, marginBottom: 8 },
   toggle: { flex: 1, padding: 12, borderRadius: 12, borderWidth: 1.5, alignItems: 'center' },
+  timingBlock: { marginBottom: 10, gap: 2 },
+  timingTitle: { fontSize: 13, fontWeight: '700', marginBottom: 2 },
+  timingRow: { flexDirection: 'row', gap: 10 },
+  timingHalf: { flex: 1, minWidth: 0 },
   supervisorList: { gap: 6 },
   supChip: { padding: 10, borderRadius: 12, borderWidth: 1.5 },
   supText: { fontSize: 13, fontWeight: '600' },

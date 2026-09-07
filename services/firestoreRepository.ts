@@ -6,15 +6,17 @@ import {
   getDocs,
   query,
   setDoc,
+  updateDoc,
   where,
   writeBatch,
 } from 'firebase/firestore';
 
-import { DEFAULT_SHIFT_CHANGE_TIMINGS, INITIAL_USERS } from '@/constants/config';
+import { DEFAULT_NORMAL_SHIFT_TIMINGS, DEFAULT_SHIFT_CHANGE_TIMINGS, INITIAL_USERS } from '@/constants/config';
 import {
   FIRESTORE_COLLECTIONS,
   FIRESTORE_SEED_VERSION,
 } from '@/constants/firestoreCollections';
+import { MOCK_CLINICS, DEFAULT_CLINIC } from '@/data/mockClinics';
 import { INITIAL_TEAM_MESSAGES } from '@/data/mockChat';
 import {
   MOCK_EMPLOYEES,
@@ -47,23 +49,49 @@ import {
   localSaveShiftChangeDates,
   localLoadShiftChangeTimings,
   localSaveShiftChangeTimings,
+  localLoadNormalShiftTimings,
+  localSaveNormalShiftTimings,
+  localLoadAttendanceRules,
+  localSaveAttendanceRules,
   localLoadNotifications,
   localSaveNotifications,
+  localLoadClinics,
+  localSaveClinics,
+  localLoadCompensatoryCredits,
+  localSaveCompensatoryCredits,
 } from '@/services/localRepository';
 import { sanitizeEmployeeAvatar } from '@/components/ui/EmployeeAvatar';
 import type { ChatMessage } from '@/types/chat';
 import type { AdminNotification } from '@/types/notification';
+import type { AttendanceRules } from '@/types/attendanceRules';
+import { DEFAULT_ATTENDANCE_RULES } from '@/types/attendanceRules';
+import { normalizeAttendanceRules } from '@/utils/attendanceRules';
 import type {
   AppUser,
   AttendanceRecord,
+  CompensatoryCredit,
   Employee,
   LeaveBalance,
   LeaveRequest,
+  NormalShiftTimings,
   PerformanceReview,
   SalarySlip,
   ShiftAssignment,
   ShiftChangeTimings,
 } from '@/types/employee';
+import type { Clinic, CreateClinicInput, SaveClinicLocationInput, UpdateClinicInput } from '@/types/clinic';
+import { DEFAULT_CLINIC_ID, MAX_CLINIC_LOCATION_HISTORY } from '@/types/clinic';
+
+/** Firestore rejects `undefined` field values — omit them before writes. */
+function stripUndefinedFields<T extends Record<string, unknown>>(value: T): T {
+  const cleaned = { ...value };
+  for (const key of Object.keys(cleaned)) {
+    if (cleaned[key] === undefined) {
+      delete cleaned[key];
+    }
+  }
+  return cleaned;
+}
 
 /** Once Firestore denies access, stay on local storage. */
 const LOCAL_MODE_KEY = '@hospitalhrm/force_local_mode';
@@ -183,8 +211,16 @@ function shiftAssignmentsCollection() {
   return collection(firestore, FIRESTORE_COLLECTIONS.SHIFT_ASSIGNMENTS);
 }
 
+function clinicsCollection() {
+  return collection(firestore, FIRESTORE_COLLECTIONS.CLINICS);
+}
+
 function clinicSettingsCollection() {
   return collection(firestore, FIRESTORE_COLLECTIONS.CLINIC_SETTINGS);
+}
+
+function compensatoryCreditsCollection() {
+  return collection(firestore, FIRESTORE_COLLECTIONS.COMPENSATORY_CREDITS);
 }
 
 function userDocId(email: string) {
@@ -265,6 +301,10 @@ async function seedFirestoreIfNeeded(ignoreLocalMode = false): Promise<void> {
     batch.set(doc(shiftAssignmentsCollection(), shift.id), shift);
   });
 
+  MOCK_CLINICS.forEach((clinic) => {
+    batch.set(doc(clinicsCollection(), clinic.id), clinic);
+  });
+
   batch.set(metaRef, {
     seeded: true,
     seedVersion: FIRESTORE_SEED_VERSION,
@@ -273,6 +313,374 @@ async function seedFirestoreIfNeeded(ignoreLocalMode = false): Promise<void> {
   });
 
   await batch.commit();
+}
+
+async function ensureClinicsSeeded(): Promise<void> {
+  const snapshot = await getDocs(clinicsCollection());
+  if (snapshot.empty) {
+    const batch = writeBatch(firestore);
+    MOCK_CLINICS.forEach((clinic) => {
+      batch.set(doc(clinicsCollection(), clinic.id), clinic);
+    });
+    await batch.commit();
+  }
+}
+
+function nextClinicId(clinics: Clinic[]): string {
+  const nums = clinics
+    .map((c) => parseInt(c.id.replace('CLN', ''), 10))
+    .filter((n) => !Number.isNaN(n));
+  const next = nums.length ? Math.max(...nums) + 1 : 1;
+  return `CLN${String(next).padStart(3, '0')}`;
+}
+
+function withClinicDefaults(raw: Clinic): Clinic {
+  const latitude = raw.latitude ?? null;
+  const longitude = raw.longitude ?? null;
+  const punchRadiusMeters = raw.punchRadiusMeters ?? 150;
+  let locationHistory = raw.locationHistory ?? [];
+  let activeLocationId = raw.activeLocationId ?? null;
+
+  if (locationHistory.length === 0 && latitude != null && longitude != null) {
+    const legacyId = `loc_${raw.id}_legacy`;
+    locationHistory = [
+      {
+        id: legacyId,
+        latitude,
+        longitude,
+        punchRadiusMeters,
+        savedAt: raw.createdAt ?? new Date().toISOString(),
+        savedBy: null,
+        isActive: true,
+      },
+    ];
+    activeLocationId = legacyId;
+  }
+
+  return {
+    ...raw,
+    active: raw.active ?? true,
+    createdAt: raw.createdAt ?? new Date().toISOString(),
+    latitude,
+    longitude,
+    punchRadiusMeters,
+    locationHistory,
+    activeLocationId,
+  };
+}
+
+function validateClinicLocationInput(input: SaveClinicLocationInput) {
+  if (input.latitude < -90 || input.latitude > 90) {
+    throw new Error('Latitude must be between -90 and 90.');
+  }
+  if (input.longitude < -180 || input.longitude > 180) {
+    throw new Error('Longitude must be between -180 and 180.');
+  }
+  if (input.punchRadiusMeters < 20 || input.punchRadiusMeters > 5000) {
+    throw new Error('Punch radius must be between 20 and 5000 meters.');
+  }
+}
+
+function withEmployeeClinicDefaults(raw: Employee): Employee {
+  const avatar = sanitizeEmployeeAvatar(raw.avatar);
+  const employee: Employee = {
+    ...raw,
+    staffCategory: raw.staffCategory ?? 'staff',
+    baseSalary: raw.baseSalary ?? 30000,
+    busFare: raw.busFare ?? 0,
+    dayShiftEnabled: raw.dayShiftEnabled ?? true,
+    nightShiftEnabled: raw.nightShiftEnabled ?? false,
+    is24HourDuty: raw.is24HourDuty ?? false,
+    dayShiftStart: raw.dayShiftStart ?? '08:00',
+    dayShiftEnd: raw.dayShiftEnd ?? '20:00',
+    nightShiftStart: raw.nightShiftStart ?? '20:00',
+    nightShiftEnd: raw.nightShiftEnd ?? '08:00',
+    clinicId: raw.clinicId ?? DEFAULT_CLINIC_ID,
+    clinicName: raw.clinicName ?? DEFAULT_CLINIC.name,
+    deletedAt: raw.deletedAt ?? null,
+  };
+  if (avatar) {
+    employee.avatar = avatar;
+  } else {
+    delete employee.avatar;
+  }
+  return employee;
+}
+
+export async function loadClinics(): Promise<Clinic[]> {
+  return withCloudOnly(async () => {
+    await ensureCloudFirestoreSeed();
+    await ensureClinicsSeeded();
+    const snapshot = await getDocs(clinicsCollection());
+    return snapshot.docs
+      .map((item) => withClinicDefaults(item.data() as Clinic))
+      .filter((c) => c.active)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+}
+
+export async function createClinic(input: CreateClinicInput): Promise<Clinic> {
+  return withCloudOnly(async () => {
+    await ensureClinicsSeeded();
+    const name = input.name.trim();
+    const address = input.address.trim();
+    if (!name) {
+      throw new Error('Clinic name is required.');
+    }
+    if (!address) {
+      throw new Error('Clinic address is required.');
+    }
+
+    const existing = await getDocs(clinicsCollection());
+    const clinics = existing.docs.map((item) => item.data() as Clinic);
+    const clinic: Clinic = {
+      id: nextClinicId(clinics),
+      name,
+      address,
+      active: true,
+      createdAt: new Date().toISOString(),
+      latitude: null,
+      longitude: null,
+      punchRadiusMeters: 150,
+    };
+    await setDoc(doc(clinicsCollection(), clinic.id), clinic);
+    return withClinicDefaults(clinic);
+  });
+}
+
+export async function updateClinic(clinicId: string, input: UpdateClinicInput): Promise<Clinic> {
+  return withCloudOnly(async () => {
+    await ensureClinicsSeeded();
+    const ref = doc(clinicsCollection(), clinicId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      throw new Error('Clinic not found');
+    }
+
+    const current = withClinicDefaults(snap.data() as Clinic);
+    const next: Clinic = { ...current };
+
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) throw new Error('Clinic name is required.');
+      next.name = name;
+    }
+    if (input.address !== undefined) {
+      const address = input.address.trim();
+      if (!address) throw new Error('Clinic address is required.');
+      next.address = address;
+    }
+    if (input.latitude !== undefined) next.latitude = input.latitude;
+    if (input.longitude !== undefined) next.longitude = input.longitude;
+    if (input.punchRadiusMeters !== undefined) {
+      const radius = input.punchRadiusMeters;
+      if (radius != null && (radius < 20 || radius > 5000)) {
+        throw new Error('Punch radius must be between 20 and 5000 meters.');
+      }
+      next.punchRadiusMeters = radius;
+    }
+
+    await updateDoc(ref, {
+      name: next.name,
+      address: next.address,
+      latitude: next.latitude ?? null,
+      longitude: next.longitude ?? null,
+      punchRadiusMeters: next.punchRadiusMeters ?? 150,
+    });
+    return withClinicDefaults(next);
+  });
+}
+
+export async function saveClinicLocation(
+  clinicId: string,
+  input: SaveClinicLocationInput
+): Promise<Clinic> {
+  return withCloudOnly(async () => {
+    await ensureClinicsSeeded();
+    validateClinicLocationInput(input);
+
+    const ref = doc(clinicsCollection(), clinicId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      throw new Error('Clinic not found');
+    }
+
+    const current = withClinicDefaults(snap.data() as Clinic);
+    const savedAt = new Date().toISOString();
+    let history = [...(current.locationHistory ?? [])];
+    let entryId = input.entryId ?? null;
+
+    if (entryId && history.some((entry) => entry.id === entryId)) {
+      history = history.map((entry) =>
+        entry.id === entryId
+          ? {
+              ...entry,
+              latitude: input.latitude,
+              longitude: input.longitude,
+              punchRadiusMeters: input.punchRadiusMeters,
+              placeName: input.placeName?.trim() || entry.placeName || null,
+              savedAt,
+              savedBy: input.savedBy ?? entry.savedBy ?? null,
+              isActive: true,
+            }
+          : { ...entry, isActive: false }
+      );
+    } else {
+      entryId = `loc_${Date.now()}`;
+      history = [
+        {
+          id: entryId,
+          latitude: input.latitude,
+          longitude: input.longitude,
+          punchRadiusMeters: input.punchRadiusMeters,
+          placeName: input.placeName?.trim() || null,
+          savedAt,
+          savedBy: input.savedBy ?? null,
+          isActive: true,
+        },
+        ...history.map((entry) => ({ ...entry, isActive: false })),
+      ].slice(0, MAX_CLINIC_LOCATION_HISTORY);
+    }
+
+    const next: Clinic = {
+      ...current,
+      latitude: input.latitude,
+      longitude: input.longitude,
+      punchRadiusMeters: input.punchRadiusMeters,
+      activeLocationId: entryId,
+      locationHistory: history,
+    };
+
+    await updateDoc(ref, {
+      latitude: next.latitude,
+      longitude: next.longitude,
+      punchRadiusMeters: next.punchRadiusMeters,
+      activeLocationId: next.activeLocationId,
+      locationHistory: next.locationHistory,
+    });
+    return withClinicDefaults(next);
+  });
+}
+
+export async function activateClinicLocation(clinicId: string, entryId: string): Promise<Clinic> {
+  return withCloudOnly(async () => {
+    await ensureClinicsSeeded();
+    const ref = doc(clinicsCollection(), clinicId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      throw new Error('Clinic not found');
+    }
+
+    const current = withClinicDefaults(snap.data() as Clinic);
+    const target = current.locationHistory?.find((entry) => entry.id === entryId);
+    if (!target) {
+      throw new Error('Saved location not found');
+    }
+
+    const history = (current.locationHistory ?? []).map((entry) => ({
+      ...entry,
+      isActive: entry.id === entryId,
+    }));
+
+    const next: Clinic = {
+      ...current,
+      latitude: target.latitude,
+      longitude: target.longitude,
+      punchRadiusMeters: target.punchRadiusMeters,
+      activeLocationId: entryId,
+      locationHistory: history,
+    };
+
+    await updateDoc(ref, {
+      latitude: next.latitude,
+      longitude: next.longitude,
+      punchRadiusMeters: next.punchRadiusMeters,
+      activeLocationId: next.activeLocationId,
+      locationHistory: next.locationHistory,
+    });
+    return withClinicDefaults(next);
+  });
+}
+
+export async function deactivateClinicLocation(clinicId: string, entryId: string): Promise<Clinic> {
+  return withCloudOnly(async () => {
+    await ensureClinicsSeeded();
+    const ref = doc(clinicsCollection(), clinicId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      throw new Error('Clinic not found');
+    }
+
+    const current = withClinicDefaults(snap.data() as Clinic);
+    const target = current.locationHistory?.find((entry) => entry.id === entryId);
+    if (!target) {
+      throw new Error('Saved location not found');
+    }
+    if (!target.isActive) {
+      return current;
+    }
+
+    const history = (current.locationHistory ?? []).map((entry) => ({
+      ...entry,
+      isActive: false,
+    }));
+
+    const next: Clinic = {
+      ...current,
+      latitude: null,
+      longitude: null,
+      activeLocationId: null,
+      locationHistory: history,
+    };
+
+    await updateDoc(ref, {
+      latitude: null,
+      longitude: null,
+      activeLocationId: null,
+      locationHistory: next.locationHistory,
+    });
+    return withClinicDefaults(next);
+  });
+}
+
+export async function removeClinicLocation(clinicId: string, entryId: string): Promise<Clinic> {
+  return withCloudOnly(async () => {
+    await ensureClinicsSeeded();
+    const ref = doc(clinicsCollection(), clinicId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      throw new Error('Clinic not found');
+    }
+
+    const current = withClinicDefaults(snap.data() as Clinic);
+    const target = current.locationHistory?.find((entry) => entry.id === entryId);
+    if (!target) {
+      throw new Error('Saved location not found');
+    }
+
+    const history = (current.locationHistory ?? []).filter((entry) => entry.id !== entryId);
+    const wasActive = Boolean(target.isActive || current.activeLocationId === entryId);
+    const next: Clinic = wasActive
+      ? {
+          ...current,
+          latitude: null,
+          longitude: null,
+          activeLocationId: null,
+          locationHistory: history.map((entry) => ({ ...entry, isActive: false })),
+        }
+      : {
+          ...current,
+          locationHistory: history,
+        };
+
+    await updateDoc(ref, {
+      latitude: next.latitude ?? null,
+      longitude: next.longitude ?? null,
+      activeLocationId: next.activeLocationId ?? null,
+      locationHistory: next.locationHistory,
+    });
+    return withClinicDefaults(next);
+  });
 }
 
 export async function createNewHireRecords(
@@ -315,23 +723,7 @@ export async function loadEmployees(): Promise<Employee[]> {
     await ensureCloudFirestoreSeed();
     const snapshot = await getDocs(employeesCollection());
 
-    return snapshot.docs.map((item) => {
-      const raw = item.data() as Employee;
-      const avatar = sanitizeEmployeeAvatar(raw.avatar);
-      return {
-        ...raw,
-        avatar: avatar === raw.avatar ? raw.avatar : avatar,
-        staffCategory: raw.staffCategory ?? 'staff',
-        baseSalary: raw.baseSalary ?? 30000,
-        busFare: raw.busFare ?? 0,
-        dayShiftEnabled: raw.dayShiftEnabled ?? true,
-        nightShiftEnabled: raw.nightShiftEnabled ?? false,
-        dayShiftStart: raw.dayShiftStart ?? '08:00',
-        dayShiftEnd: raw.dayShiftEnd ?? '20:00',
-        nightShiftStart: raw.nightShiftStart ?? '20:00',
-        nightShiftEnd: raw.nightShiftEnd ?? '08:00',
-      };
-    });
+    return snapshot.docs.map((item) => withEmployeeClinicDefaults(item.data() as Employee));
   });
 }
 
@@ -339,7 +731,10 @@ export async function saveEmployees(employees: Employee[]): Promise<void> {
   return withCloudOnly(async () => {
     const batch = writeBatch(firestore);
     employees.forEach((employee) => {
-      batch.set(doc(employeesCollection(), employee.employeeId), employee);
+      batch.set(
+        doc(employeesCollection(), employee.employeeId),
+        stripUndefinedFields(employee as unknown as Record<string, unknown>)
+      );
     });
     await batch.commit();
   });
@@ -378,6 +773,7 @@ export async function loadAllAttendance(): Promise<AttendanceRecord[]> {
         ...raw,
         otHours: raw.otHours ?? 0,
         scheduledHours: raw.scheduledHours ?? 0,
+        continuePunchIn: raw.continuePunchIn ?? null,
       };
     });
   }, localLoadAllAttendance);
@@ -393,6 +789,7 @@ export async function loadAttendanceForEmployee(employeeId: string): Promise<Att
         ...raw,
         otHours: raw.otHours ?? 0,
         scheduledHours: raw.scheduledHours ?? 0,
+        continuePunchIn: raw.continuePunchIn ?? null,
       };
     });
   }, () => localLoadAttendanceForEmployee(employeeId));
@@ -578,4 +975,73 @@ export async function saveShiftChangeTimings(timings: ShiftChangeTimings): Promi
   return withStore(async () => {
     await setDoc(doc(clinicSettingsCollection(), 'shiftChangeTimings'), normalized);
   }, () => localSaveShiftChangeTimings(normalized));
+}
+
+function normalizeNormalShiftTimings(raw: Partial<NormalShiftTimings> | undefined): NormalShiftTimings {
+  return {
+    dayStart: raw?.dayStart ?? DEFAULT_NORMAL_SHIFT_TIMINGS.dayStart,
+    dayEnd: raw?.dayEnd ?? DEFAULT_NORMAL_SHIFT_TIMINGS.dayEnd,
+    nightStart: raw?.nightStart ?? DEFAULT_NORMAL_SHIFT_TIMINGS.nightStart,
+    nightEnd: raw?.nightEnd ?? DEFAULT_NORMAL_SHIFT_TIMINGS.nightEnd,
+  };
+}
+
+export async function loadNormalShiftTimings(): Promise<NormalShiftTimings> {
+  return withStore(async () => {
+    await ensureFirestoreSeed();
+    const snap = await getDoc(doc(clinicSettingsCollection(), 'normalShiftTimings'));
+    if (!snap.exists()) return { ...DEFAULT_NORMAL_SHIFT_TIMINGS };
+    return normalizeNormalShiftTimings(snap.data() as Partial<NormalShiftTimings>);
+  }, async () => {
+    const stored = await localLoadNormalShiftTimings();
+    return stored ? normalizeNormalShiftTimings(stored) : { ...DEFAULT_NORMAL_SHIFT_TIMINGS };
+  });
+}
+
+export async function saveNormalShiftTimings(timings: NormalShiftTimings): Promise<void> {
+  const normalized = normalizeNormalShiftTimings(timings);
+  return withStore(async () => {
+    await setDoc(doc(clinicSettingsCollection(), 'normalShiftTimings'), normalized);
+  }, () => localSaveNormalShiftTimings(normalized));
+}
+
+export async function loadAttendanceRules(): Promise<AttendanceRules> {
+  return withStore(async () => {
+    await ensureFirestoreSeed();
+    const snap = await getDoc(doc(clinicSettingsCollection(), 'attendanceRules'));
+    if (!snap.exists()) return { ...DEFAULT_ATTENDANCE_RULES };
+    return normalizeAttendanceRules(snap.data() as Partial<AttendanceRules>);
+  }, async () => {
+    const stored = await localLoadAttendanceRules();
+    return stored ? normalizeAttendanceRules(stored) : { ...DEFAULT_ATTENDANCE_RULES };
+  });
+}
+
+export async function saveAttendanceRules(rules: AttendanceRules): Promise<void> {
+  const normalized = normalizeAttendanceRules(rules);
+  return withStore(async () => {
+    await setDoc(doc(clinicSettingsCollection(), 'attendanceRules'), normalized);
+  }, () => localSaveAttendanceRules(normalized));
+}
+
+export async function loadCompensatoryCredits(employeeId?: string): Promise<CompensatoryCredit[]> {
+  return withStore(async () => {
+    await ensureFirestoreSeed();
+    const snapshot = employeeId
+      ? await getDocs(query(compensatoryCreditsCollection(), where('employeeId', '==', employeeId)))
+      : await getDocs(compensatoryCreditsCollection());
+    return snapshot.docs
+      .map((item) => item.data() as CompensatoryCredit)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, () => localLoadCompensatoryCredits(employeeId));
+}
+
+export async function saveCompensatoryCredits(credits: CompensatoryCredit[]): Promise<void> {
+  return withStore(async () => {
+    const batch = writeBatch(firestore);
+    credits.forEach((credit) => {
+      batch.set(doc(compensatoryCreditsCollection(), credit.id), credit);
+    });
+    await batch.commit();
+  }, () => localSaveCompensatoryCredits(credits));
 }

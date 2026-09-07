@@ -1,10 +1,11 @@
-import { Tabs, Redirect } from 'expo-router';
+import { Tabs, Redirect, useRouter, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
+import { RequestsNotificationIcon } from '@/components/notifications/RequestsNotificationIcon';
 import { useColorScheme } from '@/components/useColorScheme';
 import { showConfirm } from '@/utils/uiAlert';
 
@@ -29,6 +30,8 @@ const ADMIN_TAB_COLORS: Record<string, { active: string; inactive: string; bg: s
   employees: { active: '#0891B2', inactive: '#0891B2', bg: '#ECFEFF' },
   'new-hire': { active: '#DB2777', inactive: '#DB2777', bg: '#FDF2F8' },
 };
+
+/** Filled approval badge — blue circle with white check (header + alerts). */
 
 function AdminTabIcon({ routeName, focused }: { routeName: string; focused: boolean }) {
   const icons = ADMIN_TAB_ICONS[routeName] ?? ADMIN_TAB_ICONS.index;
@@ -59,7 +62,9 @@ function adminTabOptions(routeName: string, title: string) {
 }
 
 export default function AdminLayout() {
-  const { isAuthenticated, isAdmin, logout, adminName } = useApp();
+  const router = useRouter();
+  const { isAuthenticated, isAdmin, logout, adminName, unreadNotificationCount, refreshData } =
+    useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const insets = useSafeAreaInsets();
@@ -76,8 +81,14 @@ export default function AdminLayout() {
     if (confirmed) await logout();
   };
 
+  const tabBarBottomInset = Math.max(
+    insets.bottom,
+    Platform.select({ ios: 22, android: 12, web: 20, default: 10 }) ?? 10
+  );
+  const tabBarContentHeight = 56;
+
   return (
-    <>
+    <View style={styles.layout}>
       <View
         style={[
           styles.topBar,
@@ -88,18 +99,34 @@ export default function AdminLayout() {
           },
         ]}
       >
-        <Text style={[styles.topTitle, { color: colors.text }]}>Hospital HR · {adminName}</Text>
-        <Pressable onPress={handleLogout} hitSlop={8}>
-          <Text style={[styles.signOut, { color: colors.danger }]}>Sign out</Text>
-        </Pressable>
+        <Text style={[styles.topTitle, { color: colors.text }]} numberOfLines={1}>
+          Hospital HR · {adminName}
+        </Text>
+        <View style={styles.topActions}>
+          <Pressable
+            onPress={async () => {
+              await refreshData();
+              router.push('/notifications' as Href);
+            }}
+            style={({ pressed }) => [styles.notifBtn, { opacity: pressed ? 0.85 : 1 }]}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Requests"
+          >
+            <RequestsNotificationIcon count={unreadNotificationCount} />
+          </Pressable>
+          <Pressable onPress={handleLogout} hitSlop={8}>
+            <Text style={[styles.signOut, { color: colors.danger }]}>Sign out</Text>
+          </Pressable>
+        </View>
       </View>
       <Tabs
         screenOptions={{
           tabBarStyle: {
             backgroundColor: colors.tabBar,
             borderTopColor: colors.borderLight,
-            paddingBottom: Platform.OS === 'ios' ? 22 : 10,
-            height: Platform.OS === 'ios' ? 88 : 72,
+            paddingBottom: tabBarBottomInset,
+            height: tabBarContentHeight + tabBarBottomInset,
           },
           headerShown: false,
           tabBarLabelStyle: { fontSize: 10, fontWeight: '700' },
@@ -119,7 +146,22 @@ export default function AdminLayout() {
           }}
         />
         <Tabs.Screen
+          name="deleted-staff"
+          options={{
+            href: null,
+            headerShown: true,
+            title: 'Deleted staff',
+          }}
+        />
+        <Tabs.Screen
           name="latecomers"
+          options={{
+            href: null,
+            headerShown: true,
+          }}
+        />
+        <Tabs.Screen
+          name="employee/[id]"
           options={{
             href: null,
             headerShown: true,
@@ -133,12 +175,21 @@ export default function AdminLayout() {
             title: 'Broadcast',
           }}
         />
+        <Tabs.Screen
+          name="shift-attendance-report"
+          options={{
+            href: null,
+            headerShown: true,
+            title: 'Shift Attendance Report',
+          }}
+        />
       </Tabs>
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  layout: { flex: 1 },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -146,8 +197,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 12,
     borderBottomWidth: 1,
+    gap: 12,
   },
-  topTitle: { fontSize: 15, fontWeight: '800' },
+  topTitle: { fontSize: 15, fontWeight: '800', flex: 1 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 12, overflow: 'visible' },
+  notifBtn: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
   signOut: { fontSize: 13, fontWeight: '700' },
   iconWrap: {
     width: 30,

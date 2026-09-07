@@ -11,7 +11,10 @@ export default function Root({ children }: { children: ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
+        />
         <ScrollViewStyleReset />
         <style dangerouslySetInnerHTML={{ __html: mobileWebStyles }} />
       </head>
@@ -24,17 +27,22 @@ const mobileWebStyles = `
 html,
 body {
   height: 100%;
+  min-height: 100dvh;
   margin: 0;
   padding: 0;
 }
 
 body {
+  overflow: auto !important;
   background-color: #dbe4f0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 #root {
   width: 100%;
-  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
 
 @media (min-width: ${MOBILE_WEB_MAX_WIDTH + 1}px) {

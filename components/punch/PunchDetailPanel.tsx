@@ -22,6 +22,13 @@ import {
   formatPunchAlertTitle,
   formatPunchPreviewLines,
 } from '@/utils/punchDetails';
+import {
+  canContinueNextShift,
+  getTodayAttendance,
+  hasPunchedOutToday,
+  isShiftOpen,
+} from '@/utils/punchSessions';
+import { showPunchOutChoice } from '@/utils/uiAlert';
 import { useColorScheme } from '@/components/useColorScheme';
 
 function showAlert(title: string, message: string, onOk?: () => void) {
@@ -38,7 +45,7 @@ interface PunchDetailPanelProps {
 }
 
 export function PunchDetailPanel({ onClose }: PunchDetailPanelProps) {
-  const { employee, attendance, doPunchIn, doPunchOut } = useApp();
+  const { employee, attendance, doPunchIn, doPunchOut, doContinueShift } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
 
@@ -46,9 +53,14 @@ export function PunchDetailPanel({ onClose }: PunchDetailPanelProps) {
   const [wifiMessage, setWifiMessage] = useState('Checking network...');
   const [loading, setLoading] = useState(false);
 
-  const today = attendance[0];
-  const canPunchIn = today && !today.punchIn;
-  const canPunchOut = today && today.punchIn && !today.punchOut;
+  const todayKey = format(new Date(), 'yyyy-MM-dd');
+  const today = getTodayAttendance(attendance, todayKey) ?? attendance[0];
+  const canPunchIn = Boolean(today && !today.punchIn);
+  const canPunchOut = isShiftOpen(today);
+  const canContinue = canContinueNextShift(attendance, todayKey);
+  const showPunchOutChoiceOnTap = canPunchOut && canContinue;
+  const punchedOutToday = hasPunchedOutToday(attendance, todayKey);
+  const showContinueButton = canContinue || punchedOutToday;
   const employeeName = employee ? `${employee.firstName} ${employee.lastName}` : undefined;
   const detailLines = formatPunchPreviewLines(today, employee);
 
@@ -95,7 +107,7 @@ export function PunchDetailPanel({ onClose }: PunchDetailPanelProps) {
     }
   };
 
-  const handlePunchOut = async () => {
+  const performPunchOut = async () => {
     setLoading(true);
     try {
       const result = await verifyOfficeWifi();
@@ -104,6 +116,33 @@ export function PunchDetailPanel({ onClose }: PunchDetailPanelProps) {
       if (record) showPunchResult(record);
     } catch (e) {
       showAlert('Error', e instanceof Error ? e.message : 'Punch out failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePunchOut = () => {
+    if (showPunchOutChoiceOnTap) {
+      showPunchOutChoice(handleContinue, performPunchOut);
+      return;
+    }
+    void performPunchOut();
+  };
+
+  const handleContinue = async () => {
+    if (punchedOutToday) {
+      showAlert('You already punched out', 'Continue is not available after punch out.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await verifyOfficeWifi();
+      const record = result.valid
+        ? await doContinueShift('wifi', result.ssid)
+        : await doContinueShift('manual', null);
+      if (record) showPunchResult(record);
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : 'Could not continue to next shift');
     } finally {
       setLoading(false);
     }
@@ -201,9 +240,12 @@ export function PunchDetailPanel({ onClose }: PunchDetailPanelProps) {
             </>
           ) : null}
           {canPunchOut ? (
-            <Button title="Punch Out Now" variant="danger" onPress={handlePunchOut} loading={loading} />
+            <Button title="Punch Out" variant="danger" onPress={handlePunchOut} loading={loading} />
           ) : null}
-          {today?.punchOut ? (
+          {showContinueButton ? (
+            <Button title="Continue" variant="outline" onPress={handleContinue} loading={loading} />
+          ) : null}
+          {!canPunchIn && !canPunchOut && !canContinue && !punchedOutToday && today?.punchOut ? (
             <Text style={[styles.doneText, { color: colors.textSecondary }]}>
               Attendance completed for today.
             </Text>

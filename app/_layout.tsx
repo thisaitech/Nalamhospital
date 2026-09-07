@@ -7,6 +7,7 @@ import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import { MobileWebFrame } from '@/components/MobileWebFrame';
+import { FloatingNotificationHost } from '@/components/notifications/FloatingNotificationHost';
 import { AppProvider, useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
 import { initFirebaseAnalytics } from '@/services/firebase';
@@ -31,8 +32,15 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     const root = segments[0];
     const inAuth = root === 'login';
     const inAdmin = root === 'admin';
-    const employeeRoutes = ['(tabs)', 'profile', 'leave-request', 'punch', 'announcement'];
-    const inEmployee = employeeRoutes.includes(root as string);
+    const employeeOnlyRoutes = [
+      '(tabs)',
+      'profile',
+      'leave-request',
+      'compensatory-off',
+      'punch',
+      'announcement',
+    ];
+    const inEmployeeOnly = employeeOnlyRoutes.includes(root as string);
 
     if (!isAuthenticated && !inAuth) {
       router.replace('/login');
@@ -42,7 +50,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       router.replace(isAdmin ? '/admin' : '/(tabs)');
       return;
     }
-    if (isAuthenticated && isAdmin && inEmployee) {
+    if (isAuthenticated && isAdmin && inEmployeeOnly) {
       router.replace('/admin');
       return;
     }
@@ -110,15 +118,20 @@ function RootLayoutNav() {
     <ThemeProvider value={customTheme}>
       <MobileWebFrame>
         <AuthGate>
-          <Stack>
-            <Stack.Screen name="login" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="admin" options={{ headerShown: false }} />
-            <Stack.Screen name="profile" options={{ title: 'Edit Profile', headerBackTitle: 'Back' }} />
-            <Stack.Screen name="leave-request" options={{ presentation: 'modal', title: 'Request Leave' }} />
-            <Stack.Screen name="announcement" options={{ presentation: 'modal', title: 'Admin Message' }} />
-            <Stack.Screen name="punch" options={{ presentation: 'modal', headerShown: false }} />
-          </Stack>
+          <View style={{ flex: 1 }}>
+            <Stack>
+              <Stack.Screen name="login" options={{ headerShown: false }} />
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="admin" options={{ headerShown: false }} />
+              <Stack.Screen name="profile" options={{ title: 'Edit Profile', headerBackTitle: 'Back' }} />
+              <Stack.Screen name="leave-request" options={{ presentation: 'modal', title: 'Request Leave' }} />
+              <Stack.Screen name="compensatory-off" options={{ presentation: 'modal', title: 'Compensatory Off' }} />
+              <Stack.Screen name="announcement" options={{ presentation: 'modal', title: 'Admin Message' }} />
+              <Stack.Screen name="notifications" options={{ title: 'Requests' }} />
+              <Stack.Screen name="punch" options={{ presentation: 'modal', headerShown: false }} />
+            </Stack>
+            <FloatingNotificationHost />
+          </View>
         </AuthGate>
       </MobileWebFrame>
     </ThemeProvider>

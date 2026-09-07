@@ -10,11 +10,17 @@ import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
 import { getCurrentWifiInfo, verifyOfficeWifi } from '@/services/wifiService';
 import { formatDisplayTime } from '@/utils/formatTime';
-import { showAlert } from '@/utils/uiAlert';
+import {
+  canContinueNextShift,
+  getTodayAttendance,
+  hasPunchedOutToday,
+  isShiftOpen,
+} from '@/utils/punchSessions';
+import { showAlert, showPunchOutChoice } from '@/utils/uiAlert';
 import { useColorScheme } from '@/components/useColorScheme';
 
 export default function AttendanceScreen() {
-  const { attendance, doPunchIn, doPunchOut, refreshData } = useApp();
+  const { employee, attendance, doPunchIn, doPunchOut, doContinueShift, refreshData } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
 
@@ -23,9 +29,15 @@ export default function AttendanceScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const today = attendance[0];
-  const canPunchIn = today && !today.punchIn;
-  const canPunchOut = today && today.punchIn && !today.punchOut;
+  const todayKey = format(new Date(), 'yyyy-MM-dd');
+  const today = getTodayAttendance(attendance, todayKey);
+  const is24HourDoctor = Boolean(employee?.is24HourDuty);
+  const canPunchIn = !is24HourDoctor && Boolean(today && !today.punchIn);
+  const canPunchOut = !is24HourDoctor && isShiftOpen(today);
+  const canContinue = !is24HourDoctor && canContinueNextShift(attendance, todayKey);
+  const showPunchOutChoiceOnTap = canPunchOut && canContinue;
+  const punchedOutToday = !is24HourDoctor && hasPunchedOutToday(attendance, todayKey);
+  const showContinueButton = canContinue || punchedOutToday;
 
   const checkWifi = useCallback(async () => {
     await getCurrentWifiInfo();
@@ -73,19 +85,56 @@ export default function AttendanceScreen() {
     }
   };
 
-  const handlePunchOut = async () => {
+  const performPunchOut = async () => {
     setLoading(true);
     try {
       const result = await verifyOfficeWifi();
       const method = result.valid ? 'wifi' : 'manual';
-      await doPunchOut(method);
-      showAlert('Punched Out', `Recorded at ${format(new Date(), 'h:mm a')}`);
+      const record = await doPunchOut(method);
+      showAlert(
+        'Punched Out',
+        `Total attended today: ${record?.hoursWorked ?? 0}h.`
+      );
     } catch (e) {
       showAlert('Error', e instanceof Error ? e.message : 'Punch out failed');
     } finally {
       setLoading(false);
     }
   };
+
+  const handlePunchOut = () => {
+    if (showPunchOutChoiceOnTap) {
+      showPunchOutChoice(handleContinue, performPunchOut);
+      return;
+    }
+    void performPunchOut();
+  };
+
+  const handleContinue = async () => {
+    if (punchedOutToday) {
+      showAlert('You already punched out', 'Continue is not available after punch out.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await verifyOfficeWifi();
+      const record = result.valid
+        ? await doContinueShift('wifi', result.ssid)
+        : await doContinueShift('manual', null);
+      if (record) {
+        showAlert(
+          'Next shift started',
+          `Continued at ${formatDisplayTime(record.continuePunchIn)}. Hours so far are saved — continue again for another shift, or punch out when finished.`
+        );
+      }
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : 'Could not continue to next shift');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const historyRecords = attendance.filter((r) => r.punchIn);
 
   return (
     <ScrollView
@@ -119,55 +168,42 @@ export default function AttendanceScreen() {
             {today?.punchInMethod ? (
               <StatusBadge label={today.punchInMethod} tone={today.punchInMethod === 'wifi' ? 'success' : 'warning'} />
             ) : null}
-            {today?.manualApprovalStatus === 'pending' ? (
-              <StatusBadge label="pending approval" tone="warning" />
-            ) : null}
           </View>
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <View style={styles.todayPunchBlock}>
             <Text style={[styles.punchLabel, { color: colors.textSecondary }]}>Punch Out</Text>
             <Text style={[styles.todayPunchTime, { color: colors.text }]}>
-              {formatDisplayTime(today?.punchOut)}
+              {today?.continuePunchIn ? '—' : formatDisplayTime(today?.punchOut)}
             </Text>
-            {today?.punchOutMethod ? (
+            {today?.continuePunchIn ? (
+              <StatusBadge label="continued" tone="primary" />
+            ) : today?.punchOutMethod ? (
               <StatusBadge label={today.punchOutMethod} tone="primary" />
             ) : null}
           </View>
         </View>
-        {today?.hoursWorked ? (
+        {today?.continuePunchIn ? (
+          <Text style={[styles.hours, { color: colors.textSecondary }]}>
+            Continued at {formatDisplayTime(today.continuePunchIn)} · prior total {today.hoursWorked || 0}h
+          </Text>
+        ) : today?.hoursWorked ? (
           <Text style={[styles.hours, { color: colors.primary }]}>
-            Hours worked: {today.hoursWorked}h
-            {today.otHours > 0 ? ` · OT (payable): ${today.otHours}h` : ''}
-            {today.scheduledHours > 0 ? ` · Scheduled: ${today.scheduledHours}h` : ''}
+            Hours attended: {today.hoursWorked}h
+            {today.otHours > 0 ? ` · OT: ${today.otHours}h` : ''}
           </Text>
         ) : null}
       </Card>
 
-      <Card style={styles.todayCard}>
-        <Text style={[styles.todayLabel, { color: colors.textSecondary }]}>This period (your records)</Text>
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryItem}>
-            <Text style={[styles.summaryValue, { color: colors.text }]}>
-              {Math.round(attendance.reduce((s, r) => s + (r.scheduledHours || 0), 0) * 10) / 10}h
-            </Text>
-            <Text style={[styles.punchLabel, { color: colors.textMuted }]}>Scheduled</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={[styles.summaryValue, { color: '#0F766E' }]}>
-              {Math.round(attendance.reduce((s, r) => s + (r.hoursWorked || 0), 0) * 10) / 10}h
-            </Text>
-            <Text style={[styles.punchLabel, { color: colors.textMuted }]}>Attended</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={[styles.summaryValue, { color: colors.danger }]}>
-              {attendance.filter((r) => !r.punchIn && r.status === 'absent').length}
-            </Text>
-            <Text style={[styles.punchLabel, { color: colors.textMuted }]}>Absent days</Text>
-          </View>
-        </View>
-      </Card>
-
       <View style={styles.actions}>
+        {is24HourDoctor ? (
+          <Text style={[styles.doneText, { color: colors.textSecondary }]}>
+            {today?.status === 'present' || today?.punchIn
+              ? 'Present marked for today. Use Home for 24h Present.'
+              : today?.status === 'absent'
+                ? 'Absent — present window was missed.'
+                : '24h doctors mark Present on the Home screen within the admin time window.'}
+          </Text>
+        ) : null}
         {canPunchIn && (
           <>
             <Button
@@ -188,15 +224,21 @@ export default function AttendanceScreen() {
         {canPunchOut && (
           <Button title="Punch Out" variant="danger" onPress={handlePunchOut} loading={loading} />
         )}
-        {!canPunchIn && !canPunchOut && (
-          <Text style={[styles.doneText, { color: colors.textSecondary }]}>
-            {today?.punchOut ? 'You have completed attendance for today.' : 'Loading...'}
-          </Text>
+        {showContinueButton && (
+          <Button
+            title="Continue"
+            variant="outline"
+            onPress={handleContinue}
+            loading={loading}
+          />
         )}
+        {!is24HourDoctor && !canPunchIn && !canPunchOut && !canContinue && !punchedOutToday ? (
+          <Text style={[styles.doneText, { color: colors.textSecondary }]}>Loading...</Text>
+        ) : null}
       </View>
 
       <Text style={[styles.sectionTitle, { color: colors.text }]}>History</Text>
-      {attendance.slice(1).map((record) => (
+      {historyRecords.map((record) => (
         <Card key={record.id} style={styles.historyCard}>
           <Text style={[styles.historyDate, { color: colors.text }]}>
             {format(parseISO(record.date), 'MMM d, yyyy')}
@@ -218,9 +260,8 @@ export default function AttendanceScreen() {
           </View>
           {(record.hoursWorked > 0 || record.otHours > 0) && (
             <Text style={[styles.punchLabel, { color: colors.textSecondary, marginTop: 8 }]}>
-              {record.hoursWorked}h worked
+              {record.hoursWorked}h attended
               {record.otHours > 0 ? ` · OT ${record.otHours}h` : ''}
-              {record.shiftType ? ` · ${record.shiftType}` : ''}
             </Text>
           )}
         </Card>
@@ -247,9 +288,6 @@ const styles = StyleSheet.create({
   todayPunchTime: { fontSize: 28, fontWeight: '700' },
   divider: { width: 1, height: 60, marginHorizontal: 12 },
   hours: { textAlign: 'center', marginTop: 16, fontSize: 15, fontWeight: '600' },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
-  summaryItem: { flex: 1, alignItems: 'center' },
-  summaryValue: { fontSize: 18, fontWeight: '800' },
   actions: { gap: 10, marginBottom: 24 },
   manualBtn: { marginTop: 0 },
   doneText: { textAlign: 'center', fontSize: 14, padding: 16 },

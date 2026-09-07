@@ -1,4 +1,4 @@
-export type TabPictureKey = 'home' | 'time' | 'leave' | 'chat' | 'pay';
+export type TabPictureKey = 'home' | 'time' | 'leave' | 'calendar' | 'chat' | 'pay';
 
 type TabNavIconSet = {
   active: string;
@@ -36,6 +36,13 @@ export const TAB_COLORS: Record<TabPictureKey, TabColorSet> = {
     iconBg: '#FFF7ED',
     iconBgDark: 'rgba(245, 158, 11, 0.2)',
   },
+  calendar: {
+    gradientStart: '#0F766E',
+    gradientEnd: '#14B8A6',
+    icon: '#0F766E',
+    iconBg: '#F0FDFA',
+    iconBgDark: 'rgba(20, 184, 166, 0.2)',
+  },
   chat: {
     gradientStart: '#059669',
     gradientEnd: '#10B981',
@@ -56,6 +63,7 @@ export const TAB_NAV_ICONS: Record<TabPictureKey, TabNavIconSet> = {
   home: { active: 'home', inactive: 'home-outline', label: 'Home' },
   time: { active: 'time', inactive: 'time-outline', label: 'Time' },
   leave: { active: 'calendar', inactive: 'calendar-outline', label: 'Leave' },
+  calendar: { active: 'calendar-number', inactive: 'calendar-number-outline', label: 'Calendar' },
   chat: { active: 'chatbubbles', inactive: 'chatbubbles-outline', label: 'Chat' },
   pay: { active: 'wallet', inactive: 'wallet-outline', label: 'Pay' },
 };
@@ -67,6 +75,11 @@ export const TAB_PICTURES: Record<
   home: { emoji: '🏠', icon: { ios: 'house.fill', android: 'home', web: 'home' }, label: 'Home' },
   time: { emoji: '⏱️', icon: { ios: 'clock.fill', android: 'schedule', web: 'schedule' }, label: 'Time' },
   leave: { emoji: '📅', icon: { ios: 'calendar', android: 'event', web: 'event' }, label: 'Leave' },
+  calendar: {
+    emoji: '🗓️',
+    icon: { ios: 'calendar.badge.clock', android: 'calendar_month', web: 'calendar_month' },
+    label: 'Calendar',
+  },
   chat: { emoji: '💬', icon: { ios: 'bubble.left.and.bubble.right.fill', android: 'chat', web: 'chat' }, label: 'Chat' },
   pay: { emoji: '💰', icon: { ios: 'dollarsign.circle.fill', android: 'payments', web: 'payments' }, label: 'Pay' },
 };

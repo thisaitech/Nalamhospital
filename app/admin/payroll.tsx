@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import {
   Platform,
   Pressable,
@@ -9,12 +9,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { StatusSymbolBadge } from '@/components/ui/StatusSymbolBadge';
 import { SelectField } from '@/components/ui/SelectField';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
@@ -30,6 +31,11 @@ import {
   formatPayslipDate,
 } from '@/utils/annualPayslip';
 import { downloadAnnualPayslipPdf } from '@/utils/downloadAnnualPayslipPdf';
+import {
+  buildClinicFilterOptions,
+  filterEmployeesByClinic,
+  type ClinicFilterId,
+} from '@/utils/clinicScope';
 import { showAlert } from '@/utils/uiAlert';
 
 type PayrollTab = 'monthly' | 'annual';
@@ -69,7 +75,15 @@ function formatAmountDisplay(n: number): string {
 }
 
 export default function AdminPayrollScreen() {
-  const { generatePayroll, loadAllPayroll, allEmployees } = useApp();
+  const router = useRouter();
+  const {
+    generatePayroll,
+    loadAllPayroll,
+    markPayslipsPaid,
+    allEmployees,
+    allClinics,
+    selectedClinicId,
+  } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const insets = useSafeAreaInsets();
@@ -80,9 +94,15 @@ export default function AdminPayrollScreen() {
   const now = new Date();
   const [year] = useState(now.getFullYear());
   const [monthIndex, setMonthIndex] = useState(now.getMonth());
+  const [clinicId, setClinicId] = useState<ClinicFilterId>(
+    selectedClinicId === 'all' ? 'all' : selectedClinicId
+  );
   const [slips, setSlips] = useState<SalarySlip[]>([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedSlipIds, setSelectedSlipIds] = useState<string[]>([]);
+  const [markingPaid, setMarkingPaid] = useState(false);
 
   const [employeeId, setEmployeeId] = useState('');
   const [monthlyEmployeeId, setMonthlyEmployeeId] = useState('');
@@ -99,22 +119,47 @@ export default function AdminPayrollScreen() {
 
   const financialYearOptions = useMemo(() => buildFinancialYearOptions(6), []);
 
-  const employeeOptions = useMemo(
-    () =>
-      allEmployees.map((e) => ({
-        value: e.employeeId,
-        label: `${getEmployeeDisplayName(e)} (${e.employeeId})`,
-      })),
+  const clinicOptions = useMemo(() => buildClinicFilterOptions(allClinics), [allClinics]);
+
+  const activeEmployees = useMemo(
+    () => allEmployees.filter((employee) => !employee.deletedAt),
     [allEmployees]
   );
 
-  const selectedEmployee = allEmployees.find((e) => e.employeeId === employeeId) ?? null;
+  const scopedEmployees = useMemo(
+    () => filterEmployeesByClinic(activeEmployees, clinicId),
+    [activeEmployees, clinicId]
+  );
+
+  const scopedEmployeeIds = useMemo(
+    () => new Set(scopedEmployees.map((e) => e.employeeId)),
+    [scopedEmployees]
+  );
+
+  const employeeOptions = useMemo(
+    () =>
+      scopedEmployees.map((e) => ({
+        value: e.employeeId,
+        label: `${getEmployeeDisplayName(e)} (${e.employeeId})`,
+      })),
+    [scopedEmployees]
+  );
+
+  const selectedEmployee = scopedEmployees.find((e) => e.employeeId === employeeId) ?? null;
 
   const visibleMonthlySlips = useMemo(() => {
     if (!monthlyEmployeeId) return slips;
     return slips.filter((s) => s.employeeId === monthlyEmployeeId);
   }, [slips, monthlyEmployeeId]);
 
+  const handleClinicChange = (nextClinicId: string) => {
+    setClinicId(nextClinicId);
+    setMonthlyEmployeeId('');
+    setEmployeeId('');
+    setSelectMode(false);
+    setSelectedSlipIds([]);
+    if (annualStep === 'form') setAnnualStep('start');
+  };
   const earningTotals = useMemo(() => {
     const rows = EARNING_HEADS.map((head, index) => ({
       sno: index + 1,
@@ -133,17 +178,29 @@ export default function AdminPayrollScreen() {
     try {
       const all = await loadAllPayroll();
       const month = MONTH_NAMES[monthIndex];
-      setSlips(all.filter((s) => s.year === year && s.month === month));
+      setSlips(
+        all.filter(
+          (slip) =>
+            slip.year === year &&
+            slip.month === month &&
+            scopedEmployeeIds.has(slip.employeeId)
+        )
+      );
     } finally {
       setLoading(false);
     }
-  }, [loadAllPayroll, monthIndex, year]);
+  }, [loadAllPayroll, monthIndex, year, scopedEmployeeIds]);
 
   useFocusEffect(
     useCallback(() => {
       load();
     }, [load])
   );
+
+  useEffect(() => {
+    setSelectMode(false);
+    setSelectedSlipIds([]);
+  }, [monthIndex, monthlyEmployeeId, clinicId]);
 
   const handleGenerate = async () => {
     if (!monthlyEmployeeId) {
@@ -152,9 +209,9 @@ export default function AdminPayrollScreen() {
     }
     setGenerating(true);
     try {
-      const generated = await generatePayroll(year, monthIndex, monthlyEmployeeId);
-      setSlips(generated);
-      const emp = allEmployees.find((e) => e.employeeId === monthlyEmployeeId);
+      await generatePayroll(year, monthIndex, monthlyEmployeeId);
+      await load();
+      const emp = scopedEmployees.find((e) => e.employeeId === monthlyEmployeeId);
       const name = emp ? getEmployeeDisplayName(emp) : monthlyEmployeeId;
       showAlert(
         'Payslip ready',
@@ -164,6 +221,50 @@ export default function AdminPayrollScreen() {
       showAlert('Error', e instanceof Error ? e.message : 'Could not generate payroll');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const toggleSelectMode = () => {
+    setSelectMode((prev) => {
+      if (prev) setSelectedSlipIds([]);
+      return !prev;
+    });
+  };
+
+  const toggleSlipSelection = (slip: SalarySlip) => {
+    if (!selectMode || slip.status === 'paid') return;
+    setSelectedSlipIds((prev) =>
+      prev.includes(slip.id) ? prev.filter((id) => id !== slip.id) : [...prev, slip.id]
+    );
+  };
+
+  const handleMarkPaid = async () => {
+    if (!selectMode) {
+      showAlert('Select mode', 'Tap Select first, then choose payslips to mark as paid.');
+      return;
+    }
+    const pendingIds = selectedSlipIds.filter((id) => {
+      const slip = visibleMonthlySlips.find((s) => s.id === id);
+      return slip?.status === 'pending';
+    });
+    if (!pendingIds.length) {
+      showAlert('Nothing selected', 'Select at least one pending payslip.');
+      return;
+    }
+    setMarkingPaid(true);
+    try {
+      await markPayslipsPaid(pendingIds);
+      await load();
+      setSelectedSlipIds([]);
+      setSelectMode(false);
+      showAlert(
+        'Marked paid',
+        `${pendingIds.length} payslip${pendingIds.length === 1 ? '' : 's'} marked as paid. Staff will see Paid on their Pay page.`
+      );
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : 'Could not mark payslips as paid');
+    } finally {
+      setMarkingPaid(false);
     }
   };
 
@@ -179,7 +280,7 @@ export default function AdminPayrollScreen() {
       showAlert('Choose employee', 'Select an employee before generating the annual slip.');
       return;
     }
-    const emp = allEmployees.find((e) => e.employeeId === employeeId);
+    const emp = scopedEmployees.find((e) => e.employeeId === employeeId);
     if (!emp) {
       showAlert('Choose employee', 'Selected employee was not found.');
       return;
@@ -255,6 +356,13 @@ export default function AdminPayrollScreen() {
             value={financialYear}
             options={financialYearOptions}
             onChange={setFinancialYear}
+            {...fieldColors}
+          />
+          <SelectField
+            label="Clinic"
+            value={clinicId}
+            options={clinicOptions}
+            onChange={handleClinicChange}
             {...fieldColors}
           />
           <SelectField
@@ -410,7 +518,16 @@ export default function AdminPayrollScreen() {
         tab === 'monthly' ? <RefreshControl refreshing={loading} onRefresh={load} /> : undefined
       }
     >
-      <Text style={[styles.title, { color: colors.text }]}>Payroll</Text>
+      <View style={styles.headerRow}>
+        <Text style={[styles.title, { color: colors.text }]}>Payroll</Text>
+        <Pressable
+          onPress={() => router.push('/admin/shift-attendance-report' as Href)}
+          style={[styles.reportBtn, { borderColor: ACCENT, backgroundColor: ACCENT_SOFT }]}
+        >
+          <Ionicons name="document-text-outline" size={15} color={ACCENT} />
+          <Text style={[styles.reportBtnText, { color: ACCENT }]}>Shift Report</Text>
+        </Pressable>
+      </View>
 
       <View style={[styles.tabRow, { backgroundColor: colors.card, borderColor: colors.borderLight }]}>
         <Pressable
@@ -436,13 +553,30 @@ export default function AdminPayrollScreen() {
 
       {tab === 'monthly' ? (
         <>
-          <SelectField
-            label="Month"
-            value={String(monthIndex)}
-            options={monthOptions}
-            onChange={(v) => setMonthIndex(Number(v))}
-            {...fieldColors}
-          />
+          <View style={styles.filterRow}>
+            <View style={styles.filterCell}>
+              <SelectField
+                label="Clinic"
+                value={clinicId}
+                options={clinicOptions}
+                onChange={handleClinicChange}
+                compact
+                hideLeadingIcon
+                {...fieldColors}
+              />
+            </View>
+            <View style={styles.filterCell}>
+              <SelectField
+                label="Month"
+                value={String(monthIndex)}
+                options={monthOptions}
+                onChange={(v) => setMonthIndex(Number(v))}
+                compact
+                hideLeadingIcon
+                {...fieldColors}
+              />
+            </View>
+          </View>
           <SelectField
             label=""
             value={monthlyEmployeeId}
@@ -464,16 +598,121 @@ export default function AdminPayrollScreen() {
             disabled={generating}
           />
 
+          {visibleMonthlySlips.length > 0 ? (
+            <View style={styles.slipActionsRow}>
+              <Pressable
+                onPress={toggleSelectMode}
+                style={({ pressed }) => [
+                  styles.slipActionBtn,
+                  {
+                    borderColor: selectMode ? ACCENT : colors.borderLight,
+                    backgroundColor: selectMode ? ACCENT_SOFT : colors.card,
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Select payslips"
+              >
+                <Ionicons
+                  name={selectMode ? 'checkbox' : 'checkbox-outline'}
+                  size={16}
+                  color={selectMode ? ACCENT : colors.textSecondary}
+                />
+                <Text
+                  style={[
+                    styles.slipActionText,
+                    { color: selectMode ? ACCENT : colors.textSecondary },
+                  ]}
+                >
+                  Select
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void handleMarkPaid()}
+                disabled={markingPaid || !selectMode || selectedSlipIds.length === 0}
+                style={({ pressed }) => [
+                  styles.slipActionBtn,
+                  styles.slipActionBtnPaid,
+                  {
+                    borderColor: colors.success,
+                    backgroundColor: colors.successLight,
+                    opacity:
+                      markingPaid || !selectMode || selectedSlipIds.length === 0
+                        ? 0.45
+                        : pressed
+                          ? 0.85
+                          : 1,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Mark selected payslips as paid"
+              >
+                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                <Text style={[styles.slipActionText, { color: colors.success }]}>
+                  {markingPaid ? 'Saving...' : 'Paid'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {selectMode && visibleMonthlySlips.some((s) => s.status === 'pending') ? (
+            <Text style={[styles.selectHint, { color: colors.textMuted }]}>
+              Tap pending payslips below to select, then tap Paid.
+            </Text>
+          ) : null}
+
           {visibleMonthlySlips.map((slip) => {
-            const emp = allEmployees.find((e) => e.employeeId === slip.employeeId);
+            const emp = scopedEmployees.find((e) => e.employeeId === slip.employeeId);
+            const isSelected = selectedSlipIds.includes(slip.id);
+            const canSelect = selectMode && slip.status === 'pending';
             return (
-              <Card key={slip.id} style={styles.card}>
-                <Text style={[styles.name, { color: colors.text }]}>
-                  {emp ? getEmployeeDisplayName(emp) : slip.employeeId}
-                </Text>
-                <Text style={[styles.meta, { color: colors.textSecondary }]}>
-                  {slip.month} {slip.year} · {slip.status}
-                </Text>
+              <Pressable
+                key={slip.id}
+                onPress={() => toggleSlipSelection(slip)}
+                disabled={!canSelect}
+              >
+                <Card
+                  style={[
+                    styles.card,
+                    canSelect && isSelected
+                      ? { borderWidth: 2, borderColor: ACCENT, backgroundColor: ACCENT_SOFT }
+                      : null,
+                    canSelect && !isSelected ? { borderWidth: 1, borderColor: colors.borderLight } : null,
+                  ]}
+                >
+                  <View style={styles.slipHeaderRow}>
+                    {selectMode ? (
+                      <Ionicons
+                        name={
+                          slip.status === 'paid'
+                            ? 'checkmark-circle'
+                            : isSelected
+                              ? 'checkbox'
+                              : 'square-outline'
+                        }
+                        size={22}
+                        color={
+                          slip.status === 'paid'
+                            ? colors.success
+                            : isSelected
+                              ? ACCENT
+                              : colors.textMuted
+                        }
+                        style={styles.slipCheckIcon}
+                      />
+                    ) : null}
+                    <View style={styles.slipHeaderText}>
+                      <Text style={[styles.name, { color: colors.text }]}>
+                        {emp ? getEmployeeDisplayName(emp) : slip.employeeId}
+                      </Text>
+                      <View style={styles.slipMetaRow}>
+                        <Text style={[styles.meta, { color: colors.textSecondary, marginBottom: 0 }]}>
+                          {slip.month} {slip.year}
+                        </Text>
+                        <StatusSymbolBadge status={slip.status} compact />
+                      </View>
+                    </View>
+                  </View>
                 <View style={styles.row}>
                   <Text style={[styles.label, { color: colors.textMuted }]}>Basic</Text>
                   <Text style={[styles.value, { color: colors.text }]}>{formatCurrency(slip.basic)}</Text>
@@ -486,15 +725,33 @@ export default function AdminPayrollScreen() {
                   <Text style={[styles.label, { color: colors.textMuted }]}>Deductions</Text>
                   <Text style={[styles.value, { color: colors.danger }]}>-{formatCurrency(slip.deductions)}</Text>
                 </View>
+                {(slip.lateFine ?? 0) > 0 ? (
+                  <View style={styles.row}>
+                    <Text style={[styles.label, { color: colors.textMuted }]}>Late fine</Text>
+                    <Text style={[styles.value, { color: colors.danger }]}>
+                      -{formatCurrency(slip.lateFine ?? 0)}
+                    </Text>
+                  </View>
+                ) : null}
+                {(slip.otPay ?? 0) > 0 ? (
+                  <View style={styles.row}>
+                    <Text style={[styles.label, { color: colors.textMuted }]}>OT pay</Text>
+                    <Text style={[styles.value, { color: '#0F766E' }]}>
+                      +{formatCurrency(slip.otPay ?? 0)}
+                    </Text>
+                  </View>
+                ) : null}
                 <View style={[styles.row, styles.netRow]}>
                   <Text style={[styles.label, { color: colors.text, fontWeight: '800' }]}>Net pay</Text>
                   <Text style={[styles.net, { color: colors.primary }]}>{formatCurrency(slip.netPay)}</Text>
                 </View>
                 <Text style={[styles.detail, { color: colors.textMuted }]}>
                   Attended {slip.attendedHours ?? 0}h / {slip.scheduledHours ?? 0}h · Absent {slip.absentDays ?? 0} ·
-                  Unpaid leave {slip.unpaidLeaveDays ?? 0} · OT {slip.otHours ?? 0}h
+                  Unpaid leave {slip.unpaidLeaveDays ?? 0} · OT {slip.otHours ?? 0}h · Late fine ₹
+                  {Math.round(slip.lateFine ?? 0)}
                 </Text>
-              </Card>
+                </Card>
+              </Pressable>
             );
           })}
 
@@ -518,7 +775,24 @@ export default function AdminPayrollScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 20, gap: 10 },
-  title: { fontSize: 24, fontWeight: '800' },
+  title: { fontSize: 24, fontWeight: '800', flexShrink: 1 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  reportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+  },
+  reportBtnText: { fontSize: 12, fontWeight: '800' },
   tabRow: {
     flexDirection: 'row',
     borderRadius: 14,
@@ -533,6 +807,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tabText: { fontSize: 13, fontWeight: '700' },
+  filterRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  filterCell: {
+    flex: 1,
+    minWidth: 0,
+  },
+  slipActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
+  slipActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  slipActionBtnPaid: {},
+  slipActionText: { fontSize: 13, fontWeight: '700' },
+  selectHint: { fontSize: 12, textAlign: 'right', marginTop: -2 },
+  slipHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  slipCheckIcon: { marginTop: 2 },
+  slipHeaderText: { flex: 1, minWidth: 0 },
+  slipMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 2,
+    marginBottom: 10,
+  },
   card: { marginTop: 6 },
   name: { fontSize: 16, fontWeight: '700' },
   meta: { fontSize: 12, marginTop: 2, marginBottom: 10 },

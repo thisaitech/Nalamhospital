@@ -1,5 +1,5 @@
 import type { LeaveBalance, LeaveRequest, LeaveType } from '@/types/employee';
-import { normalizeLeaveType } from '@/utils/clinicLeave';
+import { normalizeLeaveType, isCompensatoryLeaveType } from '@/utils/clinicLeave';
 
 export function computeLeaveBalances(
   balances: LeaveBalance[],
@@ -16,6 +16,7 @@ export function computeLeaveBalances(
     const matching = (status: 'approved' | 'pending') =>
       requests.filter((request) => {
         if (request.status !== status) return false;
+        if (isCompensatoryLeaveType(request.type)) return false;
         const normalized = normalizeLeaveType(request.type);
         if (bucket === 'paid') return normalized === 'paid';
         if (bucket === 'unpaid') return normalized === 'unpaid';

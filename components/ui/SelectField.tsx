@@ -61,14 +61,11 @@ export function SelectField({
 
   if (Platform.OS === 'web') {
     return (
-      <View>
+      <View style={compact ? styles.compactWrap : undefined}>
         {label ? (
           <Text style={[styles.label, compact && styles.labelCompact, { color: mutedColor }]}>{label}</Text>
         ) : null}
         <View style={fieldStyle}>
-          {!hideLeadingIcon ? (
-            <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : primaryColor} />
-          ) : null}
           <select
             aria-label={label || placeholder}
             aria-invalid={hasError}
@@ -82,25 +79,26 @@ export function SelectField({
               outline: 'none',
               background: 'transparent',
               color: selected ? textColor : mutedColor,
-              fontSize: 16,
+              fontSize: compact ? 14 : 16,
               fontWeight: 500,
               fontFamily: 'inherit',
-              padding: '12px 0',
-              ...(hideLeadingIcon
-                ? { appearance: 'none' as const, WebkitAppearance: 'none' as const }
-                : {}),
+              padding: compact ? '10px 0' : '12px 0',
+              appearance: 'none',
+              WebkitAppearance: 'none',
+              MozAppearance: 'none',
+              cursor: disabled ? 'not-allowed' : 'pointer',
             }}
           >
-            <option value="">{placeholder}</option>
+            {placeholder ? <option value="">{placeholder}</option> : null}
             {options.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
-          {hideLeadingIcon ? (
-            <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : primaryColor} />
-          ) : null}
+          <View pointerEvents="none" style={styles.trailingIcon}>
+            <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : mutedColor} />
+          </View>
         </View>
         {hasError ? <Text style={[styles.error, { color: dangerColor }]}>{error}</Text> : null}
       </View>
@@ -121,11 +119,13 @@ export function SelectField({
         {!hideLeadingIcon ? (
           <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : primaryColor} />
         ) : null}
-        <Text style={[styles.valueText, { color: selected ? textColor : mutedColor }]}>
+        <Text style={[styles.valueText, compact && styles.valueTextCompact, { color: selected ? textColor : mutedColor }]}>
           {selected?.label ?? placeholder}
         </Text>
         {hideLeadingIcon ? (
-          <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : primaryColor} />
+          <View pointerEvents="none" style={styles.trailingIcon}>
+            <Ionicons name="chevron-down" size={18} color={hasError ? dangerColor : mutedColor} />
+          </View>
         ) : null}
       </Pressable>
 
@@ -183,6 +183,9 @@ export function SelectField({
 }
 
 const styles = StyleSheet.create({
+  compactWrap: {
+    marginBottom: 10,
+  },
   label: {
     fontSize: 13,
     fontWeight: '600',
@@ -203,13 +206,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 12,
     minHeight: 48,
-    gap: 10,
+    gap: 8,
+  },
+  trailingIcon: {
+    marginLeft: 4,
   },
   valueText: {
     flex: 1,
     fontSize: 16,
     fontWeight: '500',
     paddingVertical: 12,
+  },
+  valueTextCompact: {
+    fontSize: 14,
+    paddingVertical: 10,
   },
   error: {
     fontSize: 12,

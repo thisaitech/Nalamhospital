@@ -1,12 +1,20 @@
 import { PAYROLL_WORKING_DAYS } from '@/constants/config';
+import { countCompensatoryLeaveDays } from '@/utils/compensatoryLeave';
 import type { Employee, LeaveRequest, SalarySlip } from '@/types/employee';
 import type { AttendanceSummary } from '@/types/employee';
 
 export function dailyRate(employee: Employee): number {
+  if (employee.salaryType === 'hourly') {
+    const hourly = employee.hourlyRate || 0;
+    return Math.round(hourly * 8 * 100) / 100;
+  }
   return Math.round((employee.baseSalary / PAYROLL_WORKING_DAYS) * 100) / 100;
 }
 
 export function hourlyRate(employee: Employee, shiftHoursPerDay = 8): number {
+  if (employee.salaryType === 'hourly' && (employee.hourlyRate || 0) > 0) {
+    return employee.hourlyRate || 0;
+  }
   return Math.round((dailyRate(employee) / shiftHoursPerDay) * 100) / 100;
 }
 
@@ -26,7 +34,6 @@ export function countUnpaidLeaveDays(
         r.endDate >= fromDate
     )
     .reduce((sum, r) => {
-      // Count only days overlapping the period
       const start = r.startDate < fromDate ? fromDate : r.startDate;
       const end = r.endDate > toDate ? toDate : r.endDate;
       const days =
@@ -41,24 +48,60 @@ export function buildPayslip(params: {
   year: number;
   summary: AttendanceSummary;
   unpaidLeaveDays: number;
+  compensatoryLeaveDays?: number;
+  lateFine?: number;
+  clinicOtMultiplier?: number;
   status?: 'paid' | 'pending';
 }): SalarySlip {
-  const { employee, month, year, summary, unpaidLeaveDays, status = 'pending' } = params;
-  const rate = dailyRate(employee);
+  const {
+    employee,
+    month,
+    year,
+    summary,
+    unpaidLeaveDays,
+    compensatoryLeaveDays = 0,
+    lateFine = 0,
+    clinicOtMultiplier = 1.5,
+    status = 'pending',
+  } = params;
+
+  const otMult = employee.otMultiplier || clinicOtMultiplier || 1.5;
   const hr = hourlyRate(employee);
-
-  const unpaidLeaveDeduction = Math.round(unpaidLeaveDays * rate * 100) / 100;
-  // Absent days beyond unpaid leave already counted separately
-  const absentDeduction = Math.round(summary.absentDays * rate * 100) / 100;
-  const otPay = Math.round(summary.otHours * hr * 100) / 100;
+  const rate = dailyRate(employee);
   const busFare = employee.busFare || 0;
+  const otPay = Math.round(summary.otHours * hr * otMult * 100) / 100;
+  const unpaidLeaveDeduction = Math.round(unpaidLeaveDays * rate * 100) / 100;
+  // Hours-based pay already reflects days not worked — do not also deduct absent days.
+  const absentDeduction = 0;
+  const lateFineAmount = Math.max(0, Math.round(lateFine * 100) / 100);
 
-  const basic = employee.baseSalary;
-  const allowances = Math.round((busFare + otPay) * 100) / 100;
-  const deductions = Math.round((unpaidLeaveDeduction + absentDeduction) * 100) / 100;
+  const compensatoryAllowance = Math.round(compensatoryLeaveDays * rate * 100) / 100;
+
+  // Monthly salary → daily → hourly; Basic = hours worked that month × hourly rate.
+  // Example: ₹30,000 / working days / 8h × attended hours.
+  const basic = Math.round(summary.attendedHours * hr * 100) / 100;
+  const allowances = Math.round((busFare + otPay + compensatoryAllowance) * 100) / 100;
+  const deductions = Math.round((unpaidLeaveDeduction + lateFineAmount) * 100) / 100;
   const netPay = Math.round((basic + allowances - deductions) * 100) / 100;
 
-  const lastDay = new Date(year, ['January','February','March','April','May','June','July','August','September','October','November','December'].indexOf(month) + 1, 0);
+  const lastDay = new Date(
+    year,
+    [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ].indexOf(month) + 1,
+    0
+  );
   const paymentDate = lastDay.toISOString().split('T')[0];
 
   return {
@@ -81,5 +124,8 @@ export function buildPayslip(params: {
     busFare,
     unpaidLeaveDeduction,
     absentDeduction,
+    lateFine: lateFineAmount,
+    compensatoryLeaveDays,
+    compensatoryAllowance,
   };
 }

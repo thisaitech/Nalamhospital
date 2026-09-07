@@ -14,6 +14,7 @@ import type {
   SalarySlip,
   ShiftAssignment,
 } from '@/types/employee';
+import { DEFAULT_CLINIC_ID } from '@/types/clinic';
 
 export const MOCK_EMPLOYEES: Employee[] = [
   {
@@ -38,6 +39,8 @@ export const MOCK_EMPLOYEES: Employee[] = [
     dayShiftEnd: DEFAULT_DAY_SHIFT.end,
     nightShiftStart: DEFAULT_NIGHT_SHIFT.start,
     nightShiftEnd: DEFAULT_NIGHT_SHIFT.end,
+    clinicId: DEFAULT_CLINIC_ID,
+    clinicName: 'Nalam Clinic',
   },
   {
     id: '2',
@@ -61,6 +64,8 @@ export const MOCK_EMPLOYEES: Employee[] = [
     dayShiftEnd: '20:00',
     nightShiftStart: '20:00',
     nightShiftEnd: '08:00',
+    clinicId: DEFAULT_CLINIC_ID,
+    clinicName: 'Nalam Clinic',
   },
 ];
 
@@ -218,6 +223,7 @@ export function createTodayAttendance(employeeId: string): AttendanceRecord {
     hoursWorked: 0,
     otHours: 0,
     scheduledHours: 0,
+    continuePunchIn: null,
     status: 'absent',
     shiftType: null,
   };

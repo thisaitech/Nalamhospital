@@ -162,6 +162,32 @@ export function calculateLeaveDays(startDate: string, endDate: string): number {
   return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 }
 
+/** True when two inclusive date ranges overlap (yyyy-MM-dd). */
+export function leaveRangesOverlap(
+  startA: string,
+  endA: string,
+  startB: string,
+  endB: string
+): boolean {
+  return startA <= endB && endA >= startB;
+}
+
+export function findOverlappingLeaveRequest<
+  T extends { id: string; startDate: string; endDate: string; status: string },
+>(
+  requests: T[],
+  startDate: string,
+  endDate: string,
+  options?: { excludeId?: string }
+): T | undefined {
+  return requests.find(
+    (r) =>
+      (r.status === 'pending' || r.status === 'approved') &&
+      r.id !== options?.excludeId &&
+      leaveRangesOverlap(startDate, endDate, r.startDate, r.endDate)
+  );
+}
+
 export function isLeaveDateValueComplete(value: string): boolean {
   return value.trim().length === 10;
 }

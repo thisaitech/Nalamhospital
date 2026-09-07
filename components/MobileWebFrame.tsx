@@ -26,14 +26,13 @@ const styles = StyleSheet.create({
   shell: {
     flex: 1,
     width: '100%',
-    minHeight: '100vh',
+    minHeight: '100dvh',
     alignItems: 'center',
   },
   frame: {
     flex: 1,
     width: '100%',
-    minHeight: '100vh',
-    overflow: 'hidden',
+    minHeight: '100dvh',
     ...(Platform.OS === 'web'
       ? ({
           boxShadow: '0 10px 40px rgba(15, 23, 42, 0.14)',

@@ -1,4 +1,6 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 
 import { Card } from '@/components/ui/Card';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
@@ -27,9 +29,15 @@ const SALARY_STAT_COLORS = {
 } as const;
 
 export default function SalaryScreen() {
-  const { salarySlips } = useApp();
+  const { salarySlips, refreshData } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshData();
+    }, [refreshData])
+  );
 
   const latest = salarySlips[0];
   const paidSlips = salarySlips.filter((s) => s.status === 'paid');

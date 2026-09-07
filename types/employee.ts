@@ -13,6 +13,9 @@ export interface ShiftChangeTimings {
   dayEnd: string;
 }
 
+/** Admin-configurable hours used on normal (non change) days. */
+export type NormalShiftTimings = ShiftChangeTimings;
+
 export interface Employee {
   id: string;
   employeeId: string;
@@ -33,10 +36,18 @@ export interface Employee {
   baseSalary: number;
   /** Transport / bus fare allowance added to monthly pay. */
   busFare: number;
+  /** Monthly fixed salary or hourly wage. */
+  salaryType?: 'monthly' | 'hourly';
+  /** Used when salaryType is hourly. */
+  hourlyRate?: number;
+  /** Per-employee OT pay multiplier (falls back to clinic rule). */
+  otMultiplier?: number;
   /** Whether this person can be scheduled on day shift. */
   dayShiftEnabled: boolean;
   /** Whether this person can be scheduled on night shift. */
   nightShiftEnabled: boolean;
+  /** 24-hour continuous duty (uses dayShiftStart/dayShiftEnd as duty window). */
+  is24HourDuty?: boolean;
   /** Individual day-shift start (HH:mm). */
   dayShiftStart: string;
   /** Individual day-shift end (HH:mm). */
@@ -45,6 +56,12 @@ export interface Employee {
   nightShiftStart: string;
   /** Individual night-shift end (HH:mm). */
   nightShiftEnd: string;
+  /** Assigned clinic location. */
+  clinicId: string;
+  /** Cached clinic name for list display. */
+  clinicName?: string;
+  /** Soft-deleted (archived). Details are kept; hidden from active staff lists. */
+  deletedAt?: string | null;
 }
 
 /** Admin-assigned shift for a person on a specific date. */
@@ -68,10 +85,15 @@ export interface AttendanceRecord {
   punchOutMethod: PunchMethod | null;
   wifiSsid: string | null;
   hoursWorked: number;
-  /** Hours beyond shift end + 1 hour grace (payable OT). */
+  /** Hours beyond shift end + 1 hour grace (payable OT). Early punch-in is never OT. */
   otHours: number;
   /** Scheduled working hours for the day from assigned shift(s). */
   scheduledHours: number;
+  /**
+   * When set, the person continued into another shift after punching out.
+   * Punch-out for this segment adds hours into the same day's record (one history row).
+   */
+  continuePunchIn?: string | null;
   status: 'present' | 'absent' | 'half-day' | 'late' | 'on-leave';
   manualApprovalStatus?: 'pending' | 'approved' | 'rejected';
   shiftType?: ShiftType | 'both' | null;
@@ -81,11 +103,40 @@ export interface AttendanceRecord {
   lateSeconds?: number;
   /** Admin-entered lateness penalty for this day. */
   penaltyAmount?: number;
+  /** Admin-entered timing value used with fineMultiplier to set penalty. */
+  fineTiming?: number;
+  /** Admin-entered multiplication value used with fineTiming to set penalty. */
+  fineMultiplier?: number;
+  /** True when admin marked this day present (forgot punch). */
+  insertedByAdmin?: boolean;
+  /** Optional note when admin inserts attendance. */
+  adminNote?: string;
+  /** GPS at punch-in. */
+  punchInLatitude?: number | null;
+  punchInLongitude?: number | null;
+  punchInAccuracyMeters?: number | null;
+  punchInDistanceMeters?: number | null;
+  punchInLocationStatus?: 'in_clinic' | 'out_of_clinic' | 'unknown' | null;
+  locationApprovalStatus?: 'pending' | 'approved' | 'rejected' | null;
 }
 
 /** Paid leave is auto-applied until quota is used; then unpaid. */
-export type LeaveType = 'paid' | 'unpaid' | 'annual' | 'sick' | 'personal';
-export type LeaveStatus = 'pending' | 'approved' | 'rejected';
+export type LeaveType = 'paid' | 'unpaid' | 'annual' | 'sick' | 'personal' | 'compensatory';
+
+export type CompensatoryCreditStatus = 'available' | 'used';
+
+/** Earned when staff completes a continued (second) shift; redeemed as compensatory leave. */
+export interface CompensatoryCredit {
+  id: string;
+  employeeId: string;
+  earnedDate: string;
+  earnedFromAttendanceId: string;
+  status: CompensatoryCreditStatus;
+  createdAt: string;
+  redeemedOnDate?: string | null;
+  redeemedLeaveRequestId?: string | null;
+}
+export type LeaveStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface LeaveBalance {
   type: LeaveType;
@@ -108,6 +159,10 @@ export interface LeaveRequest {
   reviewedBy?: string;
   /** True when admin inserted leave on behalf of the person. */
   insertedByAdmin?: boolean;
+  /** Links compensatory leave to the credit that was redeemed. */
+  compensatoryCreditId?: string;
+  /** Set when staff requests to cancel an approved leave (awaiting admin decision). */
+  cancelRequestedAt?: string | null;
 }
 
 export interface PerformanceReview {
@@ -143,6 +198,10 @@ export interface SalarySlip {
   busFare?: number;
   unpaidLeaveDeduction?: number;
   absentDeduction?: number;
+  /** Sum of auto late fines for the period. */
+  lateFine?: number;
+  compensatoryLeaveDays?: number;
+  compensatoryAllowance?: number;
 }
 
 export interface AttendanceSummary {
@@ -189,6 +248,8 @@ export interface NewHireInput {
   dayShiftEnd: string;
   nightShiftStart: string;
   nightShiftEnd: string;
+  is24HourDuty?: boolean;
+  clinicId: string;
 }
 
 export interface RegisterInput {

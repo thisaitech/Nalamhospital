@@ -26,6 +26,16 @@ export const PAID_LEAVE_QUOTA = {
 /** Clinic standard shifts: 8 AM–8 PM and 8 PM–8 AM. */
 export const DEFAULT_DAY_SHIFT = { start: '08:00', end: '20:00' };
 export const DEFAULT_NIGHT_SHIFT = { start: '20:00', end: '08:00' };
+/** 24-hour duty window (same start/end time = full day). */
+export const DEFAULT_FULL_DAY_SHIFT = { start: '08:00', end: '08:00' };
+
+/** Admin-editable Normal Day clinic timings (default 8–8). */
+export const DEFAULT_NORMAL_SHIFT_TIMINGS = {
+  dayStart: DEFAULT_DAY_SHIFT.start,
+  dayEnd: DEFAULT_DAY_SHIFT.end,
+  nightStart: DEFAULT_NIGHT_SHIFT.start,
+  nightEnd: DEFAULT_NIGHT_SHIFT.end,
+} as const;
 
 /**
  * On admin-selected shift-change days:
@@ -77,7 +87,11 @@ export const LEAVE_TYPE_LABELS: Record<string, string> = {
   annual: 'Paid Leave',
   sick: 'Sick Leave',
   personal: 'Personal Leave',
+  compensatory: 'Compensatory Leave',
 };
+
+/** Minimum hours on the continued segment before earning a compensatory credit. */
+export const COMPENSATORY_MIN_SEGMENT_HOURS = 1;
 
 export const DEMO_LOGINS: Record<UserRole, { email: string; password: string }> = {
   employee: { email: 'dr.smith@clinic.com', password: 'password123' },

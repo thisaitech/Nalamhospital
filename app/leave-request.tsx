@@ -26,6 +26,7 @@ import {
 import { loadLeaveRequests } from '@/services/firestoreRepository';
 import { useColorScheme } from '@/components/useColorScheme';
 import { filterVisibleLeave, formatLeaveDayLabel, peopleWithLeaveOnDate } from '@/utils/clinicLeave';
+import { findOverlappingLeaveRequest } from '@/utils/leaveValidation';
 import type { PersonOnLeave } from '@/types/employee';
 
 function showAlert(title: string, message: string, onOk?: () => void) {
@@ -39,7 +40,7 @@ function showAlert(title: string, message: string, onOk?: () => void) {
 
 export default function LeaveRequestModal() {
   const router = useRouter();
-  const { requestLeave, employee, leaveBalances } = useApp();
+  const { requestLeave, employee, leaveBalances, leaveRequests } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
 
@@ -100,6 +101,17 @@ export default function LeaveRequestModal() {
 
     if (!employee) {
       showAlert('Not signed in', 'Please log in to submit a leave request.');
+      return;
+    }
+
+    const overlap = findOverlappingLeaveRequest(leaveRequests, leaveDate, leaveDate);
+    if (overlap) {
+      showAlert(
+        'Already requested',
+        overlap.startDate === overlap.endDate
+          ? `You already have a leave request for this date. Only one request is allowed per day.`
+          : `You already have a leave request covering these dates. Only one request is allowed.`
+      );
       return;
     }
 

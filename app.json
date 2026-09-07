@@ -25,7 +25,9 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_WIFI_STATE",
         "ACCESS_NETWORK_STATE",
-        "NEARBY_WIFI_DEVICES"
+        "NEARBY_WIFI_DEVICES",
+        "POST_NOTIFICATIONS",
+        "VIBRATE"
       ],
       "predictiveBackGestureEnabled": false
     },
@@ -54,6 +56,14 @@
         "expo-image-picker",
         {
           "photosPermission": "Allow Nalam Clinic to access your photos to set your profile picture."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/android-icon-foreground.png",
+          "color": "#4F46E5",
+          "defaultChannel": "nalam-alerts"
         }
       ],
       "@react-native-community/datetimepicker",

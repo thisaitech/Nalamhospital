@@ -1,11 +1,11 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Link, useRouter, type Href } from 'expo-router';
-import { format } from 'date-fns';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
+import { AdminClinicBar } from '@/components/admin/AdminClinicBar';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
 import { LEAVE_TYPE_LABELS } from '@/constants/config';
@@ -44,14 +44,19 @@ function MessagesAppIcon({ size = 48 }: { size?: number }) {
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const { adminStats, pendingApprovals, todayShifts, peopleOnLeaveToday, allEmployees } = useApp();
+  const {
+    clinicAdminStats,
+    clinicPendingApprovals,
+    clinicTodayShifts,
+    clinicPeopleOnLeaveToday,
+    clinicEmployees,
+  } = useApp();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const insets = useSafeAreaInsets();
-  const todayLabel = format(new Date(), 'EEE, MMM d');
 
-  const shiftRows = todayShifts.map((shift) => {
-    const emp = allEmployees.find((e) => e.employeeId === shift.employeeId);
+  const shiftRows = clinicTodayShifts.map((shift) => {
+    const emp = clinicEmployees.find((e) => e.employeeId === shift.employeeId);
     return {
       ...shift,
       name: emp ? getEmployeeDisplayName(emp) : shift.employeeId,
@@ -64,29 +69,26 @@ export default function AdminDashboard() {
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
     >
-      <View style={styles.headerRow}>
-        <View style={styles.headerText}>
-          <Text style={[styles.title, { color: colors.text }]}>Dashboard</Text>
-          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{todayLabel}</Text>
-        </View>
+      <View style={styles.topRow}>
+        <AdminClinicBar hideLabel />
         <Pressable
           onPress={() => router.push('/admin/chat' as Href)}
           style={styles.messageBtn}
           accessibilityRole="button"
           accessibilityLabel="Broadcast message"
         >
-          <MessagesAppIcon size={48} />
+          <MessagesAppIcon size={44} />
         </Pressable>
       </View>
 
       <View style={styles.stats}>
-        <StatCard label="Doctors" value={String(adminStats.totalSupervisors)} accent="#0F766E" compact centered />
-        <StatCard label="Staff" value={String(adminStats.departments)} accent="#0369A1" compact centered />
+        <StatCard label="Doctors" value={String(clinicAdminStats.totalSupervisors)} accent="#0F766E" compact centered />
+        <StatCard label="Staff" value={String(clinicAdminStats.departments)} accent="#0369A1" compact centered />
       </View>
       <View style={styles.stats}>
         <StatCard
           label="Pending"
-          value={String(adminStats.pendingApprovals)}
+          value={String(clinicAdminStats.pendingApprovals)}
           accent={colors.warning}
           compact
           centered
@@ -94,7 +96,7 @@ export default function AdminDashboard() {
         />
         <StatCard
           label="On leave"
-          value={String(peopleOnLeaveToday.length)}
+          value={String(clinicPeopleOnLeaveToday.length)}
           accent="#B45309"
           compact
           centered
@@ -127,12 +129,12 @@ export default function AdminDashboard() {
       )}
 
       <Text style={[styles.section, { color: colors.text }]}>Who's on leave today</Text>
-      {peopleOnLeaveToday.length === 0 ? (
+      {clinicPeopleOnLeaveToday.length === 0 ? (
         <Card>
           <Text style={[styles.empty, { color: colors.textSecondary }]}>Everyone is available today.</Text>
         </Card>
       ) : (
-        peopleOnLeaveToday.map((person) => (
+        clinicPeopleOnLeaveToday.map((person) => (
           <Card key={`${person.employeeId}-${person.reason}`} style={styles.card}>
             <Text style={[styles.name, { color: colors.text }]}>{person.employeeName}</Text>
             <Text style={[styles.meta, { color: colors.textSecondary }]}>
@@ -143,12 +145,12 @@ export default function AdminDashboard() {
       )}
 
       <Text style={[styles.section, { color: colors.text }]}>Pending leave</Text>
-      {pendingApprovals.length === 0 ? (
+      {clinicPendingApprovals.length === 0 ? (
         <Card>
           <Text style={[styles.empty, { color: colors.textSecondary }]}>No pending leave requests.</Text>
         </Card>
       ) : (
-        pendingApprovals.slice(0, 3).map((item) => (
+        clinicPendingApprovals.slice(0, 3).map((item) => (
           <Card key={item.id} style={styles.card}>
             <Text style={[styles.name, { color: colors.text }]}>{item.employeeName}</Text>
             <Text style={[styles.meta, { color: colors.textSecondary }]}>
@@ -165,18 +167,14 @@ export default function AdminDashboard() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 20 },
-  headerRow: {
+  topRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
+    alignItems: 'center',
+    gap: 10,
     marginBottom: 16,
   },
-  headerText: { flex: 1 },
-  title: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
-  subtitle: { fontSize: 13, marginTop: 2 },
   messageBtn: {
-    marginTop: 2,
+    flexShrink: 0,
   },
   stats: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   actions: { gap: 10, marginVertical: 16 },

@@ -4,16 +4,31 @@ import { DEMO_LOGINS } from '@/constants/config';
 import {
   enrichAttendanceApproval,
   enrichLeaveRequest,
+  enrichShiftChangeCancelRequest,
   getAdminStats,
   getPendingAttendanceApprovals,
   getPendingLeaveApprovals,
+  getPendingLeaveCancelRequests,
+  getPendingOutOfClinicPunchApprovals,
+  getPendingShiftChangeCancelRequests,
+  getRecentInClinicPunches,
   insertLeaveForEmployee,
+  adminMarkPresent,
   reviewAttendanceApproval,
   reviewLeaveRequest,
+  reviewLeaveCancelRequest,
+  reviewLocationPunchApproval,
+  reviewShiftChangeCancelRequest,
+  type EnrichedShiftChangeCancelRequest,
 } from '@/services/adminService';
 import { loadAdminBroadcasts, sendAdminBroadcast } from '@/services/chatService';
 import {
+  ADMIN_NOTIFICATION_INBOX_ID,
+} from '@/types/notification';
+import {
+  cancelShiftChangeNotification,
   countUnreadNotifications,
+  getAdminNotifications,
   getNotificationsForEmployee,
   markAllNotificationsRead,
   markNotificationRead,
@@ -26,9 +41,14 @@ import {
   getSupervisorOptions,
   registerEmployee,
   updateEmployeeProfile,
+  updateNewHire,
   loadEmployees,
   loadUsers,
+  softDeleteEmployee,
+  restoreEmployee,
 } from '@/services/employeeRegistry';
+import { createClinic, loadClinics, saveClinicLocation, activateClinicLocation, deactivateClinicLocation, removeClinicLocation, updateClinic } from '@/services/clinicService';
+import { getPunchGpsReading } from '@/services/locationService';
 import {
   getLeaveBalances,
   getLeaveRequests,
@@ -37,10 +57,27 @@ import {
   loadAttendance,
   punchIn,
   punchOut,
+  continueNextShift,
+  mark24HourDoctorPresent,
+  ensure24HourDoctorAbsentIfMissed,
   submitLeaveRequest,
+  cancelLeaveRequest,
 } from '@/services/employeeService';
-import { ensureFirestoreSeed, loadAllAttendance, loadLeaveRequests } from '@/services/firestoreRepository';
-import { generatePayrollForMonth, loadPayrollSlips } from '@/services/payrollService';
+import {
+  countAvailableCompensatoryCredits,
+  getCompensatoryCredits,
+  submitCompensatoryLeave,
+} from '@/services/compensatoryService';
+import {
+  ensureFirestoreSeed,
+  loadAllAttendance,
+  loadLeaveRequests,
+} from '@/services/firestoreRepository';
+import {
+  generatePayrollForMonth,
+  loadPayrollSlips,
+  markPayslipsPaid as markPayslipsPaidInStore,
+} from '@/services/payrollService';
 import {
   getUpcomingShifts,
   loadShiftsForDate,
@@ -55,8 +92,10 @@ import {
 import { getItem, removeItem, setItem, storageKeys } from '@/services/storage';
 import type { ChatCategory, ChatMessage } from '@/types/chat';
 import type { AdminNotification } from '@/types/notification';
+import type { Clinic, CreateClinicInput, SaveClinicLocationInput, UpdateClinicInput } from '@/types/clinic';
 import type {
   AttendanceRecord,
+  CompensatoryCredit,
   Employee,
   EmployeeProfileUpdate,
   LeaveBalance,
@@ -73,6 +112,12 @@ import type {
 } from '@/types/employee';
 import { monthDateRange, summarizeAttendanceForPeriod } from '@/utils/attendanceSummary';
 import { filterVisibleLeave } from '@/utils/clinicLeave';
+import {
+  clinicStatsForEmployees,
+  filterByEmployeeIds,
+  filterEmployeesByClinic,
+  type ClinicFilterId,
+} from '@/utils/clinicScope';
 import type { AttendanceSummary } from '@/types/employee';
 
 interface Session {
@@ -104,13 +149,39 @@ interface AppContextValue {
   attendance: AttendanceRecord[];
   leaveBalances: LeaveBalance[];
   leaveRequests: LeaveRequest[];
+  compensatoryCredits: CompensatoryCredit[];
+  availableCompensatoryCredits: number;
   salarySlips: SalarySlip[];
   chatMessages: ChatMessage[];
   notifications: AdminNotification[];
   unreadNotificationCount: number;
   allEmployees: Employee[];
+  allClinics: Clinic[];
+  selectedClinicId: ClinicFilterId;
+  setSelectedClinicId: (clinicId: ClinicFilterId) => Promise<void>;
+  clinicEmployees: Employee[];
+  deletedClinicEmployees: Employee[];
+  clinicEmployeeIds: Set<string>;
+  clinicPendingApprovals: EnrichedLeaveRequest[];
+  clinicPendingLeaveCancelRequests: EnrichedLeaveRequest[];
+  clinicPendingShiftChangeCancelRequests: EnrichedShiftChangeCancelRequest[];
+  clinicPendingAttendanceApprovals: EnrichedAttendanceApproval[];
+  clinicPendingOutOfClinicPunchApprovals: EnrichedAttendanceApproval[];
+  clinicRecentInClinicPunches: EnrichedAttendanceApproval[];
+  clinicAdminStats: {
+    totalEmployees: number;
+    totalSupervisors: number;
+    pendingApprovals: number;
+    departments: number;
+  };
+  clinicPeopleOnLeaveToday: PersonOnLeave[];
+  clinicTodayShifts: ShiftAssignment[];
   pendingApprovals: EnrichedLeaveRequest[];
+  pendingLeaveCancelRequests: EnrichedLeaveRequest[];
+  pendingShiftChangeCancelRequests: EnrichedShiftChangeCancelRequest[];
   pendingAttendanceApprovals: EnrichedAttendanceApproval[];
+  pendingOutOfClinicPunchApprovals: EnrichedAttendanceApproval[];
+  recentInClinicPunches: EnrichedAttendanceApproval[];
   adminStats: { totalEmployees: number; totalSupervisors: number; pendingApprovals: number; departments: number };
   peopleOnLeaveToday: PersonOnLeave[];
   upcomingShifts: ShiftAssignment[];
@@ -122,19 +193,52 @@ interface AppContextValue {
   refreshData: () => Promise<void>;
   doPunchIn: (method: PunchMethod, wifiSsid?: string | null) => Promise<AttendanceRecord | null>;
   doPunchOut: (method: PunchMethod) => Promise<AttendanceRecord | null>;
+  doContinueShift: (method: PunchMethod, wifiSsid?: string | null) => Promise<AttendanceRecord | null>;
+  doMark24HourPresent: () => Promise<AttendanceRecord | null>;
+  sync24HourPresentMiss: () => Promise<void>;
   requestLeave: (type: LeaveType | null, startDate: string, endDate: string, reason: string) => Promise<void>;
+  cancelLeave: (requestId: string) => Promise<void>;
+  useCompensatoryLeave: (leaveDate: string) => Promise<void>;
   sendMessage: (text: string, category?: ChatCategory) => Promise<void>;
   markNotificationAsRead: (notificationId: string) => Promise<void>;
   markAllNotificationsAsRead: () => Promise<void>;
+  cancelShiftChange: (notificationId: string) => Promise<void>;
   createHire: (input: NewHireInput) => Promise<Employee>;
+  updateHire: (employeeId: string, input: NewHireInput) => Promise<Employee>;
+  createClinic: (input: CreateClinicInput) => Promise<Clinic>;
+  updateClinicEntry: (clinicId: string, input: UpdateClinicInput) => Promise<Clinic>;
+  saveClinicLocationEntry: (clinicId: string, input: SaveClinicLocationInput) => Promise<Clinic>;
+  activateClinicLocationEntry: (clinicId: string, entryId: string) => Promise<Clinic>;
+  deactivateClinicLocationEntry: (clinicId: string, entryId: string) => Promise<Clinic>;
+  removeClinicLocationEntry: (clinicId: string, entryId: string) => Promise<Clinic>;
   updateSupervisor: (employeeId: string, supervisorId: string) => Promise<void>;
+  deleteEmployee: (employeeId: string) => Promise<void>;
+  restoreDeletedEmployee: (employeeId: string) => Promise<void>;
   approveLeave: (requestId: string) => Promise<void>;
   rejectLeave: (requestId: string) => Promise<void>;
+  approveLeaveCancel: (requestId: string) => Promise<void>;
+  rejectLeaveCancel: (requestId: string) => Promise<void>;
+  approveShiftChangeCancel: (notificationId: string) => Promise<void>;
+  rejectShiftChangeCancel: (notificationId: string) => Promise<void>;
   approveAttendance: (recordId: string) => Promise<void>;
   rejectAttendance: (recordId: string) => Promise<void>;
+  approveLocationPunch: (recordId: string) => Promise<void>;
+  rejectLocationPunch: (recordId: string) => Promise<void>;
   getSupervisors: () => Promise<Employee[]>;
   insertLeave: (employeeId: string, date: string, reason: string) => Promise<void>;
-  assignShift: (employeeId: string, date: string, shiftType: ShiftType) => Promise<void>;
+  markPresent: (params: {
+    employeeId: string;
+    date: string;
+    punchIn: string;
+    punchOut: string;
+    reason?: string;
+  }) => Promise<void>;
+  assignShift: (
+    employeeId: string,
+    date: string,
+    shiftType: ShiftType,
+    options?: { startTime?: string; endTime?: string; force24Hour?: boolean }
+  ) => Promise<void>;
   deleteShift: (shiftId: string) => Promise<void>;
   loadShiftChart: (fromDate: string, toDate: string) => Promise<ShiftAssignment[]>;
   checkShiftChangeDay: (date: string) => Promise<boolean>;
@@ -144,6 +248,7 @@ interface AppContextValue {
   getAttendanceSummaries: (year: number, monthIndex: number) => Promise<AttendanceSummary[]>;
   generatePayroll: (year: number, monthIndex: number, employeeId?: string) => Promise<SalarySlip[]>;
   loadAllPayroll: () => Promise<SalarySlip[]>;
+  markPayslipsPaid: (slipIds: string[]) => Promise<SalarySlip[]>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -154,13 +259,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [compensatoryCredits, setCompensatoryCredits] = useState<CompensatoryCredit[]>([]);
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
   const [salarySlips, setSalarySlips] = useState<SalarySlip[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
+  const [allClinics, setAllClinics] = useState<Clinic[]>([]);
+  const [selectedClinicId, setSelectedClinicIdState] = useState<ClinicFilterId>('all');
   const [pendingApprovals, setPendingApprovals] = useState<EnrichedLeaveRequest[]>([]);
+  const [pendingLeaveCancelRequests, setPendingLeaveCancelRequests] = useState<EnrichedLeaveRequest[]>([]);
+  const [pendingShiftChangeCancelRequests, setPendingShiftChangeCancelRequests] = useState<
+    EnrichedShiftChangeCancelRequest[]
+  >([]);
   const [pendingAttendanceApprovals, setPendingAttendanceApprovals] = useState<EnrichedAttendanceApproval[]>([]);
+  const [pendingOutOfClinicPunchApprovals, setPendingOutOfClinicPunchApprovals] = useState<
+    EnrichedAttendanceApproval[]
+  >([]);
+  const [recentInClinicPunches, setRecentInClinicPunches] = useState<EnrichedAttendanceApproval[]>([]);
   const [adminStats, setAdminStats] = useState({
     totalEmployees: 0,
     totalSupervisors: 0,
@@ -174,6 +290,96 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const employeeId = employee?.employeeId ?? '';
   const role = session?.role ?? null;
   const isAdmin = role === 'admin';
+  const availableCompensatoryCredits = useMemo(
+    () => countAvailableCompensatoryCredits(compensatoryCredits),
+    [compensatoryCredits]
+  );
+
+  const setSelectedClinicId = useCallback(async (clinicId: ClinicFilterId) => {
+    setSelectedClinicIdState(clinicId);
+    await setItem(storageKeys.ADMIN_CLINIC_FILTER, clinicId);
+  }, []);
+
+  const clinicEmployees = useMemo(
+    () =>
+      filterEmployeesByClinic(
+        allEmployees.filter((employee) => !employee.deletedAt),
+        selectedClinicId
+      ),
+    [allEmployees, selectedClinicId]
+  );
+  const deletedClinicEmployees = useMemo(
+    () =>
+      filterEmployeesByClinic(
+        allEmployees.filter((employee) => Boolean(employee.deletedAt)),
+        selectedClinicId
+      ),
+    [allEmployees, selectedClinicId]
+  );
+
+  const clinicEmployeeIds = useMemo(
+    () => new Set(clinicEmployees.map((employee) => employee.employeeId)),
+    [clinicEmployees]
+  );
+
+  const clinicPendingApprovals = useMemo(
+    () => filterByEmployeeIds(pendingApprovals, clinicEmployeeIds, (item) => item.employeeId),
+    [pendingApprovals, clinicEmployeeIds]
+  );
+
+  const clinicPendingLeaveCancelRequests = useMemo(
+    () => filterByEmployeeIds(pendingLeaveCancelRequests, clinicEmployeeIds, (item) => item.employeeId),
+    [pendingLeaveCancelRequests, clinicEmployeeIds]
+  );
+
+  const clinicPendingShiftChangeCancelRequests = useMemo(
+    () =>
+      filterByEmployeeIds(
+        pendingShiftChangeCancelRequests,
+        clinicEmployeeIds,
+        (item) => item.employeeId
+      ),
+    [pendingShiftChangeCancelRequests, clinicEmployeeIds]
+  );
+
+  const clinicPendingAttendanceApprovals = useMemo(
+    () =>
+      filterByEmployeeIds(pendingAttendanceApprovals, clinicEmployeeIds, (item) => item.employeeId),
+    [pendingAttendanceApprovals, clinicEmployeeIds]
+  );
+
+  const clinicPendingOutOfClinicPunchApprovals = useMemo(
+    () =>
+      filterByEmployeeIds(
+        pendingOutOfClinicPunchApprovals,
+        clinicEmployeeIds,
+        (item) => item.employeeId
+      ),
+    [pendingOutOfClinicPunchApprovals, clinicEmployeeIds]
+  );
+
+  const clinicRecentInClinicPunches = useMemo(
+    () => filterByEmployeeIds(recentInClinicPunches, clinicEmployeeIds, (item) => item.employeeId),
+    [recentInClinicPunches, clinicEmployeeIds]
+  );
+
+  const clinicPeopleOnLeaveToday = useMemo(
+    () => filterByEmployeeIds(peopleOnLeaveToday, clinicEmployeeIds, (item) => item.employeeId),
+    [peopleOnLeaveToday, clinicEmployeeIds]
+  );
+
+  const clinicTodayShifts = useMemo(
+    () => filterByEmployeeIds(todayShifts, clinicEmployeeIds, (item) => item.employeeId),
+    [todayShifts, clinicEmployeeIds]
+  );
+
+  const clinicAdminStats = useMemo(() => {
+    const scoped = clinicStatsForEmployees(clinicEmployees);
+    return {
+      ...scoped,
+      pendingApprovals: clinicPendingApprovals.length + clinicPendingLeaveCancelRequests.length + clinicPendingShiftChangeCancelRequests.length + clinicPendingAttendanceApprovals.length + clinicPendingOutOfClinicPunchApprovals.length,
+    };
+  }, [clinicEmployees, clinicPendingApprovals, clinicPendingLeaveCancelRequests, clinicPendingShiftChangeCancelRequests, clinicPendingAttendanceApprovals, clinicPendingOutOfClinicPunchApprovals]);
 
   const refreshData = useCallback(async () => {
     const today = new Date().toISOString().split('T')[0];
@@ -191,31 +397,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setTodayShifts(shiftsToday);
 
     if (session?.role === 'admin') {
-      const [employees, pendingLeave, pendingAttendance, stats] = await Promise.all([
-        loadEmployees(),
-        getPendingLeaveApprovals(),
-        getPendingAttendanceApprovals(),
-        getAdminStats(),
-      ]);
-      const [enrichedLeave, enrichedAttendance] = await Promise.all([
+      const [employees, clinics, pendingLeave, pendingCancel, pendingShiftCancel, pendingAttendance, pendingOutLocation, recentInClinic, stats, adminNotifications] =
+        await Promise.all([
+          loadEmployees(),
+          loadClinics(),
+          getPendingLeaveApprovals(),
+          getPendingLeaveCancelRequests(),
+          getPendingShiftChangeCancelRequests(),
+          getPendingAttendanceApprovals(),
+          getPendingOutOfClinicPunchApprovals(),
+          getRecentInClinicPunches(),
+          getAdminStats(),
+          getAdminNotifications(),
+        ]);
+      const [enrichedLeave, enrichedCancel, enrichedShiftCancel, enrichedAttendance, enrichedOutLocation, enrichedInClinic] =
+        await Promise.all([
         Promise.all(pendingLeave.map((r) => enrichLeaveRequest(r))),
+        Promise.all(pendingCancel.map((r) => enrichLeaveRequest(r))),
+        Promise.all(pendingShiftCancel.map((r) => enrichShiftChangeCancelRequest(r))),
         Promise.all(pendingAttendance.map((r) => enrichAttendanceApproval(r))),
+        Promise.all(pendingOutLocation.map((r) => enrichAttendanceApproval(r))),
+        Promise.all(recentInClinic.map((r) => enrichAttendanceApproval(r))),
       ]);
       setAllEmployees(employees);
+      setAllClinics(clinics);
       setPendingApprovals(enrichedLeave);
+      setPendingLeaveCancelRequests(enrichedCancel);
+      setPendingShiftChangeCancelRequests(enrichedShiftCancel);
       setPendingAttendanceApprovals(enrichedAttendance);
+      setPendingOutOfClinicPunchApprovals(enrichedOutLocation);
+      setRecentInClinicPunches(enrichedInClinic);
       setAdminStats(stats);
+      setNotifications(adminNotifications);
       return;
     }
 
     if (employeeId) {
-      const [att, leaves, balances, slips, upcoming, employeeNotifications] = await Promise.all([
+      const [att, leaves, balances, slips, upcoming, employeeNotifications, credits] =
+        await Promise.all([
         loadAttendance(employeeId),
         getLeaveRequests(employeeId),
         getLeaveBalances(employeeId),
         getSalarySlips(employeeId),
         getUpcomingShifts(employeeId),
         getNotificationsForEmployee(employeeId),
+        getCompensatoryCredits(employeeId),
       ]);
       setAttendance(att);
       setLeaveRequests(leaves);
@@ -223,6 +449,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setSalarySlips(slips);
       setUpcomingShifts(upcoming);
       setNotifications(employeeNotifications);
+      setCompensatoryCredits(credits);
     }
   }, [employeeId, employee?.staffCategory, session?.role]);
 
@@ -246,11 +473,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         const messages = await loadAdminBroadcasts();
         setChatMessages(messages);
+        const savedClinic = await getItem<ClinicFilterId>(storageKeys.ADMIN_CLINIC_FILTER);
+        if (savedClinic) {
+          setSelectedClinicIdState(savedClinic);
+        }
       } finally {
         setIsLoading(false);
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (selectedClinicId === 'all') return;
+    if (allClinics.length > 0 && !allClinics.some((clinic) => clinic.id === selectedClinicId)) {
+      setSelectedClinicId('all');
+    }
+  }, [allClinics, selectedClinicId, setSelectedClinicId]);
 
   useEffect(() => {
     if (session) {
@@ -278,6 +516,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const emp = await findEmployeeByEmail(user.email);
     if (!emp) {
       throw new Error('Employee record not found');
+    }
+    if (emp.deletedAt) {
+      throw new Error('This account is no longer active. Contact admin.');
     }
     const newSession: Session = {
       role: 'employee',
@@ -325,11 +566,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setEmployee(null);
     setAttendance([]);
     setLeaveRequests([]);
+    setCompensatoryCredits([]);
     setLeaveBalances([]);
     setSalarySlips([]);
     setAllEmployees([]);
     setPendingApprovals([]);
+    setPendingLeaveCancelRequests([]);
     setPendingAttendanceApprovals([]);
+    setPendingOutOfClinicPunchApprovals([]);
+    setRecentInClinicPunches([]);
     setPeopleOnLeaveToday([]);
     setUpcomingShifts([]);
     setTodayShifts([]);
@@ -341,7 +586,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const doPunchIn = useCallback(
     async (method: PunchMethod, wifiSsid: string | null = null) => {
       if (!employeeId) return null;
-      const record = await punchIn(employeeId, method, wifiSsid);
+      const gpsResult = await getPunchGpsReading();
+      const gps = gpsResult.ok ? gpsResult.reading : null;
+      const record = await punchIn(employeeId, method, wifiSsid, gps);
       await refreshData();
       return record;
     },
@@ -358,12 +605,57 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [employeeId, refreshData]
   );
 
+  const doContinueShift = useCallback(
+    async (method: PunchMethod, wifiSsid: string | null = null) => {
+      if (!employeeId) return null;
+      const record = await continueNextShift(employeeId, method, wifiSsid);
+      await refreshData();
+      return record;
+    },
+    [employeeId, refreshData]
+  );
+
+  const doMark24HourPresent = useCallback(async () => {
+    if (!employeeId) return null;
+    const record = await mark24HourDoctorPresent(employeeId);
+    await refreshData();
+    return record;
+  }, [employeeId, refreshData]);
+
+  const sync24HourPresentMiss = useCallback(async () => {
+    if (!employeeId) return;
+    const updated = await ensure24HourDoctorAbsentIfMissed(employeeId);
+    if (updated) await refreshData();
+  }, [employeeId, refreshData]);
+
   const requestLeave = useCallback(
     async (type: LeaveType | null, startDate: string, endDate: string, reason: string) => {
       if (!employeeId) {
         throw new Error('You must be logged in as an employee to submit leave.');
       }
       await submitLeaveRequest(employeeId, type, startDate, endDate, reason);
+      await refreshData();
+    },
+    [employeeId, refreshData]
+  );
+
+  const cancelLeave = useCallback(
+    async (requestId: string) => {
+      if (!employeeId) {
+        throw new Error('You must be logged in as an employee to cancel leave.');
+      }
+      await cancelLeaveRequest(employeeId, requestId);
+      await refreshData();
+    },
+    [employeeId, refreshData]
+  );
+
+  const useCompensatoryLeave = useCallback(
+    async (leaveDate: string) => {
+      if (!employeeId) {
+        throw new Error('You must be logged in as an employee to use compensatory leave.');
+      }
+      await submitCompensatoryLeave(employeeId, leaveDate);
       await refreshData();
     },
     [employeeId, refreshData]
@@ -389,10 +681,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const markAllNotificationsAsRead = useCallback(async () => {
-    if (!employeeId) return;
-    await markAllNotificationsRead(employeeId);
+    const inboxId = isAdmin ? ADMIN_NOTIFICATION_INBOX_ID : employeeId;
+    if (!inboxId) return;
+    await markAllNotificationsRead(inboxId);
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  }, [employeeId]);
+  }, [employeeId, isAdmin]);
+
+  const cancelShiftChange = useCallback(
+    async (notificationId: string) => {
+      if (!employeeId) {
+        throw new Error('You must be logged in to cancel a shift change.');
+      }
+      const updated = await cancelShiftChangeNotification({
+        notificationId,
+        employeeId,
+      });
+      if (updated) {
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === notificationId ? updated : n))
+        );
+      }
+      await refreshData();
+    },
+    [employeeId, refreshData]
+  );
 
   const createHire = useCallback(
     async (input: NewHireInput) => {
@@ -403,9 +715,88 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [refreshData]
   );
 
+  const updateHire = useCallback(
+    async (employeeId: string, input: NewHireInput) => {
+      const updated = await updateNewHire(employeeId, input);
+      await refreshData();
+      return updated;
+    },
+    [refreshData]
+  );
+
+  const createClinicEntry = useCallback(
+    async (input: CreateClinicInput) => {
+      const clinic = await createClinic(input);
+      await refreshData();
+      return clinic;
+    },
+    [refreshData]
+  );
+
+  const updateClinicEntry = useCallback(
+    async (clinicId: string, input: UpdateClinicInput) => {
+      const clinic = await updateClinic(clinicId, input);
+      await refreshData();
+      return clinic;
+    },
+    [refreshData]
+  );
+
+  const saveClinicLocationEntry = useCallback(
+    async (clinicId: string, input: SaveClinicLocationInput) => {
+      const clinic = await saveClinicLocation(clinicId, input);
+      await refreshData();
+      return clinic;
+    },
+    [refreshData]
+  );
+
+  const activateClinicLocationEntry = useCallback(
+    async (clinicId: string, entryId: string) => {
+      const clinic = await activateClinicLocation(clinicId, entryId);
+      await refreshData();
+      return clinic;
+    },
+    [refreshData]
+  );
+
+  const deactivateClinicLocationEntry = useCallback(
+    async (clinicId: string, entryId: string) => {
+      const clinic = await deactivateClinicLocation(clinicId, entryId);
+      await refreshData();
+      return clinic;
+    },
+    [refreshData]
+  );
+
+  const removeClinicLocationEntry = useCallback(
+    async (clinicId: string, entryId: string) => {
+      const clinic = await removeClinicLocation(clinicId, entryId);
+      await refreshData();
+      return clinic;
+    },
+    [refreshData]
+  );
+
   const updateSupervisor = useCallback(
     async (empId: string, supervisorId: string) => {
       await assignSupervisor(empId, supervisorId);
+      await refreshData();
+    },
+    [refreshData]
+  );
+
+  const deleteEmployee = useCallback(
+    async (employeeId: string) => {
+      await softDeleteEmployee(employeeId);
+      await refreshData();
+    },
+    [refreshData]
+  );
+
+  const restoreDeletedEmployee = useCallback(
+    async (employeeId: string) => {
+      await restoreEmployee(employeeId);
       await refreshData();
     },
     [refreshData]
@@ -428,6 +819,62 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     async (requestId: string) => {
       await reviewLeaveRequest(requestId, 'rejected', session?.name ?? 'Admin');
       setPendingApprovals((prev) => prev.filter((item) => item.id !== requestId));
+      setAdminStats((prev) => ({
+        ...prev,
+        pendingApprovals: Math.max(0, prev.pendingApprovals - 1),
+      }));
+      await refreshData();
+    },
+    [session?.name, refreshData]
+  );
+
+  const approveLeaveCancel = useCallback(
+    async (requestId: string) => {
+      await reviewLeaveCancelRequest(requestId, true, session?.name ?? 'Admin');
+      setPendingLeaveCancelRequests((prev) => prev.filter((item) => item.id !== requestId));
+      setAdminStats((prev) => ({
+        ...prev,
+        pendingApprovals: Math.max(0, prev.pendingApprovals - 1),
+      }));
+      await refreshData();
+    },
+    [session?.name, refreshData]
+  );
+
+  const rejectLeaveCancel = useCallback(
+    async (requestId: string) => {
+      await reviewLeaveCancelRequest(requestId, false, session?.name ?? 'Admin');
+      setPendingLeaveCancelRequests((prev) => prev.filter((item) => item.id !== requestId));
+      setAdminStats((prev) => ({
+        ...prev,
+        pendingApprovals: Math.max(0, prev.pendingApprovals - 1),
+      }));
+      await refreshData();
+    },
+    [session?.name, refreshData]
+  );
+
+  const approveShiftChangeCancel = useCallback(
+    async (notificationId: string) => {
+      await reviewShiftChangeCancelRequest(notificationId, true, session?.name ?? 'Admin');
+      setPendingShiftChangeCancelRequests((prev) =>
+        prev.filter((item) => item.notificationId !== notificationId)
+      );
+      setAdminStats((prev) => ({
+        ...prev,
+        pendingApprovals: Math.max(0, prev.pendingApprovals - 1),
+      }));
+      await refreshData();
+    },
+    [session?.name, refreshData]
+  );
+
+  const rejectShiftChangeCancel = useCallback(
+    async (notificationId: string) => {
+      await reviewShiftChangeCancelRequest(notificationId, false, session?.name ?? 'Admin');
+      setPendingShiftChangeCancelRequests((prev) =>
+        prev.filter((item) => item.notificationId !== notificationId)
+      );
       setAdminStats((prev) => ({
         ...prev,
         pendingApprovals: Math.max(0, prev.pendingApprovals - 1),
@@ -463,7 +910,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [session?.name, refreshData]
   );
 
-  const getSupervisors = useCallback(() => getSupervisorOptions(), []);
+  const approveLocationPunch = useCallback(
+    async (recordId: string) => {
+      await reviewLocationPunchApproval(recordId, true, session?.name ?? 'Admin');
+      setPendingOutOfClinicPunchApprovals((prev) => prev.filter((item) => item.id !== recordId));
+      setAdminStats((prev) => ({
+        ...prev,
+        pendingApprovals: Math.max(0, prev.pendingApprovals - 1),
+      }));
+      await refreshData();
+    },
+    [session?.name, refreshData]
+  );
+
+  const rejectLocationPunch = useCallback(
+    async (recordId: string) => {
+      await reviewLocationPunchApproval(recordId, false, session?.name ?? 'Admin');
+      setPendingOutOfClinicPunchApprovals((prev) => prev.filter((item) => item.id !== recordId));
+      setAdminStats((prev) => ({
+        ...prev,
+        pendingApprovals: Math.max(0, prev.pendingApprovals - 1),
+      }));
+      await refreshData();
+    },
+    [session?.name, refreshData]
+  );
+
+  const getSupervisors = useCallback(async () => {
+    const supervisors = await getSupervisorOptions();
+    return filterEmployeesByClinic(supervisors, selectedClinicId);
+  }, [selectedClinicId]);
 
   const insertLeave = useCallback(
     async (empId: string, date: string, reason: string) => {
@@ -478,9 +954,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [session?.name, refreshData]
   );
 
+  const markPresent = useCallback(
+    async (params: {
+      employeeId: string;
+      date: string;
+      punchIn: string;
+      punchOut: string;
+      reason?: string;
+    }) => {
+      await adminMarkPresent({
+        ...params,
+        reviewedBy: session?.name ?? 'Admin',
+      });
+      await refreshData();
+    },
+    [session?.name, refreshData]
+  );
+
   const assignShift = useCallback(
-    async (empId: string, date: string, shiftType: ShiftType) => {
-      await upsertShiftAssignment({ employeeId: empId, date, shiftType });
+    async (
+      empId: string,
+      date: string,
+      shiftType: ShiftType,
+      options?: { startTime?: string; endTime?: string; force24Hour?: boolean }
+    ) => {
+      await upsertShiftAssignment({
+        employeeId: empId,
+        date,
+        shiftType,
+        startTime: options?.startTime,
+        endTime: options?.endTime,
+        force24Hour: options?.force24Hour,
+      });
       await refreshData();
     },
     [refreshData]
@@ -527,10 +1032,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       loadLeaveRequests(),
       loadShiftsInRange(fromDate, toDate),
     ]);
-    return employees.map((emp) =>
+    const scopedEmployees = filterEmployeesByClinic(employees, selectedClinicId);
+    return scopedEmployees.map((emp) =>
       summarizeAttendanceForPeriod(emp, att, leaves, shifts, fromDate, toDate)
     );
-  }, []);
+  }, [selectedClinicId]);
 
   const generatePayroll = useCallback(
     async (year: number, monthIndex: number, employeeId?: string) => {
@@ -542,6 +1048,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loadAllPayroll = useCallback(async () => loadPayrollSlips(), []);
+
+  const markPayslipsPaid = useCallback(async (slipIds: string[]) => {
+    const updated = await markPayslipsPaidInStore(slipIds);
+    const updatedById = new Map(updated.map((slip) => [slip.id, slip]));
+    setSalarySlips((prev) => prev.map((slip) => updatedById.get(slip.id) ?? slip));
+    return updated;
+  }, []);
 
   const unreadNotificationCount = useMemo(
     () => countUnreadNotifications(notifications),
@@ -559,13 +1072,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       attendance,
       leaveBalances,
       leaveRequests,
+      compensatoryCredits,
+      availableCompensatoryCredits,
       salarySlips,
       chatMessages,
       notifications,
       unreadNotificationCount,
       allEmployees,
+      allClinics,
+      selectedClinicId,
+      setSelectedClinicId,
+      clinicEmployees,
+      deletedClinicEmployees,
+      clinicEmployeeIds,
+      clinicPendingApprovals,
+      clinicPendingLeaveCancelRequests,
+      clinicPendingShiftChangeCancelRequests,
+      clinicPendingAttendanceApprovals,
+      clinicPendingOutOfClinicPunchApprovals,
+      clinicRecentInClinicPunches,
+      clinicAdminStats,
+      clinicPeopleOnLeaveToday,
+      clinicTodayShifts,
       pendingApprovals,
+      pendingLeaveCancelRequests,
+      pendingShiftChangeCancelRequests,
       pendingAttendanceApprovals,
+      pendingOutOfClinicPunchApprovals,
+      recentInClinicPunches,
       adminStats,
       peopleOnLeaveToday,
       upcomingShifts,
@@ -577,18 +1111,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       refreshData,
       doPunchIn,
       doPunchOut,
+      doContinueShift,
+      doMark24HourPresent,
+      sync24HourPresentMiss,
       requestLeave,
+      cancelLeave,
+      useCompensatoryLeave,
       sendMessage,
       markNotificationAsRead,
       markAllNotificationsAsRead,
+      cancelShiftChange,
       createHire,
+      updateHire,
+      createClinic: createClinicEntry,
+      updateClinicEntry,
+      saveClinicLocationEntry,
+      activateClinicLocationEntry,
+      deactivateClinicLocationEntry,
+      removeClinicLocationEntry,
       updateSupervisor,
+      deleteEmployee,
+      restoreDeletedEmployee,
       approveLeave,
       rejectLeave,
+      approveLeaveCancel,
+      rejectLeaveCancel,
+      approveShiftChangeCancel,
+      rejectShiftChangeCancel,
       approveAttendance,
       rejectAttendance,
+      approveLocationPunch,
+      rejectLocationPunch,
       getSupervisors,
       insertLeave,
+      markPresent,
       assignShift,
       deleteShift,
       loadShiftChart,
@@ -599,6 +1155,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getAttendanceSummaries,
       generatePayroll,
       loadAllPayroll,
+      markPayslipsPaid,
     }),
     [
       isLoading,
@@ -609,13 +1166,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       attendance,
       leaveBalances,
       leaveRequests,
+      compensatoryCredits,
+      availableCompensatoryCredits,
       salarySlips,
       chatMessages,
       notifications,
       unreadNotificationCount,
       allEmployees,
+      allClinics,
+      selectedClinicId,
+      setSelectedClinicId,
+      clinicEmployees,
+      deletedClinicEmployees,
+      clinicEmployeeIds,
+      clinicPendingApprovals,
+      clinicPendingLeaveCancelRequests,
+      clinicPendingShiftChangeCancelRequests,
+      clinicPendingAttendanceApprovals,
+      clinicPendingOutOfClinicPunchApprovals,
+      clinicRecentInClinicPunches,
+      clinicAdminStats,
+      clinicPeopleOnLeaveToday,
+      clinicTodayShifts,
       pendingApprovals,
+      pendingLeaveCancelRequests,
+      pendingShiftChangeCancelRequests,
       pendingAttendanceApprovals,
+      pendingOutOfClinicPunchApprovals,
+      recentInClinicPunches,
       adminStats,
       peopleOnLeaveToday,
       upcomingShifts,
@@ -627,18 +1205,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       refreshData,
       doPunchIn,
       doPunchOut,
+      doContinueShift,
+      doMark24HourPresent,
+      sync24HourPresentMiss,
       requestLeave,
+      cancelLeave,
+      useCompensatoryLeave,
       sendMessage,
       markNotificationAsRead,
       markAllNotificationsAsRead,
+      cancelShiftChange,
       createHire,
+      updateHire,
+      createClinicEntry,
+      updateClinicEntry,
+      saveClinicLocationEntry,
+      activateClinicLocationEntry,
+      deactivateClinicLocationEntry,
+      removeClinicLocationEntry,
       updateSupervisor,
+      deleteEmployee,
+      restoreDeletedEmployee,
       approveLeave,
       rejectLeave,
+      approveLeaveCancel,
+      rejectLeaveCancel,
+      approveShiftChangeCancel,
+      rejectShiftChangeCancel,
       approveAttendance,
       rejectAttendance,
+      approveLocationPunch,
+      rejectLocationPunch,
       getSupervisors,
       insertLeave,
+      markPresent,
       assignShift,
       deleteShift,
       loadShiftChart,
@@ -649,6 +1249,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getAttendanceSummaries,
       generatePayroll,
       loadAllPayroll,
+      markPayslipsPaid,
     ]
   );
 

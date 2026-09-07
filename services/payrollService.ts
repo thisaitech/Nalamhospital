@@ -5,10 +5,12 @@ import {
   loadLeaveRequests,
   saveSalarySlips,
 } from '@/services/firestoreRepository';
+import { getAttendanceRules } from '@/services/attendanceRulesService';
 import { loadEmployees } from '@/services/employeeRegistry';
 import { loadShiftsInRange } from '@/services/shiftService';
 import { monthDateRange, summarizeAttendanceForPeriod } from '@/utils/attendanceSummary';
 import { buildPayslip, countUnpaidLeaveDays } from '@/utils/payrollCalc';
+import { countCompensatoryLeaveDays } from '@/utils/compensatoryLeave';
 import type { SalarySlip } from '@/types/employee';
 
 export async function generatePayrollForMonth(
@@ -20,11 +22,12 @@ export async function generatePayrollForMonth(
   if (!month) throw new Error('Invalid month');
 
   const { fromDate, toDate } = monthDateRange(year, monthIndex);
-  const [allEmployees, attendance, leaveRequests, shifts] = await Promise.all([
+  const [allEmployees, attendance, leaveRequests, shifts, rules] = await Promise.all([
     loadEmployees(),
     loadAllAttendance(),
     loadLeaveRequests(),
     loadShiftsInRange(fromDate, toDate),
+    getAttendanceRules(),
   ]);
 
   const employees = employeeId
@@ -50,12 +53,30 @@ export async function generatePayrollForMonth(
       fromDate,
       toDate
     );
+    const compensatoryLeaveDays = countCompensatoryLeaveDays(
+      employee.employeeId,
+      leaveRequests,
+      fromDate,
+      toDate
+    );
+
+    // Late fine = sum of admin-entered penalty amounts only (not auto slabs).
+    const lateFine = attendance
+      .filter(
+        (r) =>
+          r.employeeId === employee.employeeId && r.date >= fromDate && r.date <= toDate
+      )
+      .reduce((sum, r) => sum + Math.max(0, Number(r.penaltyAmount) || 0), 0);
+
     return buildPayslip({
       employee,
       month,
       year,
       summary,
       unpaidLeaveDays,
+      compensatoryLeaveDays,
+      lateFine,
+      clinicOtMultiplier: rules.otMultiplier,
       status: 'pending',
     });
   });
@@ -81,10 +102,25 @@ export async function loadPayrollSlips(employeeId?: string): Promise<SalarySlip[
 }
 
 export async function markPayslipPaid(slipId: string): Promise<SalarySlip> {
+  const [updated] = await markPayslipsPaid([slipId]);
+  if (!updated) throw new Error('Payslip not found');
+  return updated;
+}
+
+export async function markPayslipsPaid(slipIds: string[]): Promise<SalarySlip[]> {
+  const uniqueIds = Array.from(new Set(slipIds.filter(Boolean)));
+  if (!uniqueIds.length) return [];
+
   const all = await loadAllSalarySlips();
-  const target = all.find((s) => s.id === slipId);
-  if (!target) throw new Error('Payslip not found');
-  const updated = { ...target, status: 'paid' as const };
-  await saveSalarySlips([updated]);
+  const idSet = new Set(uniqueIds);
+  const updated = all
+    .filter((slip) => idSet.has(slip.id))
+    .map((slip) => ({ ...slip, status: 'paid' as const }));
+
+  if (!updated.length) {
+    throw new Error('No matching payslips found.');
+  }
+
+  await saveSalarySlips(updated);
   return updated;
 }

@@ -28,6 +28,8 @@ interface ProfileSummaryProps {
   employeeId: string;
   avatar?: string;
   size?: number;
+  showAvatar?: boolean;
+  showGreeting?: boolean;
 }
 
 export function ProfileSummary({
@@ -37,29 +39,35 @@ export function ProfileSummary({
   employeeId,
   avatar,
   size = 46,
+  showAvatar = true,
+  showGreeting = true,
 }: ProfileSummaryProps) {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
 
   return (
     <View style={styles.left}>
-      <EmployeeAvatar
-        firstName={firstName}
-        lastName={lastName}
-        avatar={avatar}
-        employeeId={employeeId}
-        size={size}
-        borderRadius={16}
-        borderWidth={2}
-        borderColor={colors.primary}
-        backgroundColor={colors.background}
-        textColor={colors.textMuted}
-        fontSize={size > 50 ? 20 : 17}
-        style={styles.avatar}
-      />
+      {showAvatar ? (
+        <EmployeeAvatar
+          firstName={firstName}
+          lastName={lastName}
+          avatar={avatar}
+          employeeId={employeeId}
+          size={size}
+          borderRadius={16}
+          borderWidth={2}
+          borderColor={colors.primary}
+          backgroundColor={colors.background}
+          textColor={colors.textMuted}
+          fontSize={size > 50 ? 20 : 17}
+          style={styles.avatar}
+        />
+      ) : null}
       <View style={styles.info}>
-        <Text style={[styles.greeting, { color: colors.textMuted }]}>Good {getGreeting()}</Text>
-        <Text style={[styles.name, { color: colors.text }]}>
+        {showGreeting ? (
+          <Text style={[styles.greeting, { color: colors.textMuted }]}>Good {getGreeting()}</Text>
+        ) : null}
+        <Text style={[styles.name, { color: colors.text, marginTop: showGreeting ? 2 : 0 }]}>
           {firstName} {lastName}
         </Text>
         <Text style={[styles.meta, { color: colors.textSecondary }]} numberOfLines={1}>
@@ -103,8 +111,8 @@ const styles = StyleSheet.create({
   avatar: { marginRight: 12 },
   info: { flex: 1 },
   greeting: { fontSize: 13, fontWeight: '500', textTransform: 'capitalize' },
-  name: { fontSize: 22, fontWeight: '800', letterSpacing: -0.5, marginTop: 2 },
-  meta: { fontSize: 13, marginTop: 3, fontWeight: '500' },
+  name: { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
+  meta: { fontSize: 13, marginTop: 4, fontWeight: '500' },
   chevron: {
     width: 28,
     height: 28,

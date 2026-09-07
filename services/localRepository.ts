@@ -9,6 +9,7 @@ import {
   getInitialAttendance,
   getInitialShifts,
 } from '@/data/mockData';
+import { MOCK_CLINICS } from '@/data/mockClinics';
 import { getItem, setItem } from '@/services/storage';
 import { sanitizeEmployeeAvatar } from '@/components/ui/EmployeeAvatar';
 import type { ChatMessage } from '@/types/chat';
@@ -16,14 +17,19 @@ import type { AdminNotification } from '@/types/notification';
 import type {
   AppUser,
   AttendanceRecord,
+  CompensatoryCredit,
   Employee,
   LeaveBalance,
   LeaveRequest,
   PerformanceReview,
   SalarySlip,
+  NormalShiftTimings,
   ShiftAssignment,
   ShiftChangeTimings,
 } from '@/types/employee';
+import type { AttendanceRules } from '@/types/attendanceRules';
+import type { Clinic } from '@/types/clinic';
+import { DEFAULT_CLINIC_ID } from '@/types/clinic';
 
 const LOCAL_KEYS = {
   META: '@hospitalhrm/local_meta',
@@ -39,6 +45,10 @@ const LOCAL_KEYS = {
   SHIFT_ASSIGNMENTS: '@hospitalhrm/local_shift_assignments',
   SHIFT_CHANGE_DATES: '@hospitalhrm/local_shift_change_dates',
   SHIFT_CHANGE_TIMINGS: '@hospitalhrm/local_shift_change_timings',
+  NORMAL_SHIFT_TIMINGS: '@hospitalhrm/local_normal_shift_timings',
+  ATTENDANCE_RULES: '@hospitalhrm/local_attendance_rules',
+  CLINICS: '@hospitalhrm/local_clinics',
+  COMPENSATORY_CREDITS: '@hospitalhrm/local_compensatory_credits',
 } as const;
 
 async function ensureLocalSeed(): Promise<void> {
@@ -56,6 +66,7 @@ async function ensureLocalSeed(): Promise<void> {
   await setItem(LOCAL_KEYS.SALARY_SLIPS, MOCK_SALARY);
   await setItem(LOCAL_KEYS.PERFORMANCE_REVIEWS, []);
   await setItem(LOCAL_KEYS.SHIFT_ASSIGNMENTS, getInitialShifts());
+  await setItem(LOCAL_KEYS.CLINICS, MOCK_CLINICS);
   await setItem(LOCAL_KEYS.META, {
     seeded: true,
     seedVersion: FIRESTORE_SEED_VERSION,
@@ -72,12 +83,18 @@ function withEmployeeDefaults(raw: Employee): Employee {
     staffCategory: raw.staffCategory ?? 'staff',
     baseSalary: raw.baseSalary ?? 30000,
     busFare: raw.busFare ?? 0,
+    salaryType: raw.salaryType ?? 'monthly',
+    hourlyRate: raw.hourlyRate ?? 0,
+    otMultiplier: raw.otMultiplier ?? 1.5,
     dayShiftEnabled: raw.dayShiftEnabled ?? true,
     nightShiftEnabled: raw.nightShiftEnabled ?? false,
     dayShiftStart: raw.dayShiftStart ?? '08:00',
     dayShiftEnd: raw.dayShiftEnd ?? '20:00',
     nightShiftStart: raw.nightShiftStart ?? '20:00',
     nightShiftEnd: raw.nightShiftEnd ?? '08:00',
+    clinicId: raw.clinicId ?? DEFAULT_CLINIC_ID,
+    clinicName: raw.clinicName,
+    deletedAt: raw.deletedAt ?? null,
   };
 }
 
@@ -86,6 +103,7 @@ function withAttendanceDefaults(raw: AttendanceRecord): AttendanceRecord {
     ...raw,
     otHours: raw.otHours ?? 0,
     scheduledHours: raw.scheduledHours ?? 0,
+    continuePunchIn: raw.continuePunchIn ?? null,
   };
 }
 
@@ -271,6 +289,26 @@ export async function localSaveShiftChangeTimings(timings: ShiftChangeTimings): 
   await setItem(LOCAL_KEYS.SHIFT_CHANGE_TIMINGS, timings);
 }
 
+export async function localLoadNormalShiftTimings(): Promise<NormalShiftTimings | null> {
+  await ensureLocalSeed();
+  return (await getItem<NormalShiftTimings>(LOCAL_KEYS.NORMAL_SHIFT_TIMINGS)) ?? null;
+}
+
+export async function localSaveNormalShiftTimings(timings: NormalShiftTimings): Promise<void> {
+  await ensureLocalSeed();
+  await setItem(LOCAL_KEYS.NORMAL_SHIFT_TIMINGS, timings);
+}
+
+export async function localLoadAttendanceRules(): Promise<AttendanceRules | null> {
+  await ensureLocalSeed();
+  return (await getItem<AttendanceRules>(LOCAL_KEYS.ATTENDANCE_RULES)) ?? null;
+}
+
+export async function localSaveAttendanceRules(rules: AttendanceRules): Promise<void> {
+  await ensureLocalSeed();
+  await setItem(LOCAL_KEYS.ATTENDANCE_RULES, rules);
+}
+
 export async function localLoadNotifications(employeeId?: string): Promise<AdminNotification[]> {
   await ensureLocalSeed();
   const all = (await getItem<AdminNotification[]>(LOCAL_KEYS.NOTIFICATIONS)) ?? [];
@@ -284,4 +322,30 @@ export async function localSaveNotifications(notifications: AdminNotification[])
   const map = new Map(existing.map((n) => [n.id, n]));
   notifications.forEach((n) => map.set(n.id, n));
   await setItem(LOCAL_KEYS.NOTIFICATIONS, Array.from(map.values()));
+}
+
+export async function localLoadClinics(): Promise<Clinic[]> {
+  await ensureLocalSeed();
+  const clinics = (await getItem<Clinic[]>(LOCAL_KEYS.CLINICS)) ?? [];
+  return clinics.filter((c) => c.active).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function localSaveClinics(clinics: Clinic[]): Promise<void> {
+  await ensureLocalSeed();
+  await setItem(LOCAL_KEYS.CLINICS, clinics);
+}
+
+export async function localLoadCompensatoryCredits(employeeId?: string): Promise<CompensatoryCredit[]> {
+  await ensureLocalSeed();
+  const all = (await getItem<CompensatoryCredit[]>(LOCAL_KEYS.COMPENSATORY_CREDITS)) ?? [];
+  const filtered = employeeId ? all.filter((c) => c.employeeId === employeeId) : all;
+  return filtered.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function localSaveCompensatoryCredits(credits: CompensatoryCredit[]): Promise<void> {
+  await ensureLocalSeed();
+  const existing = (await getItem<CompensatoryCredit[]>(LOCAL_KEYS.COMPENSATORY_CREDITS)) ?? [];
+  const map = new Map(existing.map((c) => [c.id, c]));
+  credits.forEach((c) => map.set(c.id, c));
+  await setItem(LOCAL_KEYS.COMPENSATORY_CREDITS, Array.from(map.values()));
 }

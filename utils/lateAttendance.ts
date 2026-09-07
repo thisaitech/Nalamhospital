@@ -1,4 +1,7 @@
 import type { AttendanceRecord, ShiftAssignment, ShiftType } from '@/types/employee';
+import type { AttendanceRules } from '@/types/attendanceRules';
+import { DEFAULT_ATTENDANCE_RULES } from '@/types/attendanceRules';
+import { calcLateMinutes } from '@/utils/attendanceRules';
 
 export interface LatecomerRow {
   recordId: string;
@@ -7,7 +10,9 @@ export interface LatecomerRow {
   shiftStart: string;
   punchIn: string;
   lateSeconds: number;
+  lateMinutes: number;
   shiftType: ShiftType;
+  /** Admin-entered fine (₹). Not auto-calculated. */
   penaltyAmount: number;
 }
 
@@ -25,12 +30,12 @@ export function calcLateSeconds(punchIn: string, shiftStart: string): number {
 }
 
 export function formatLateDuration(totalSeconds: number): string {
-  if (totalSeconds <= 0) return '0 sec';
-  if (totalSeconds < 60) return `${totalSeconds} sec`;
+  if (totalSeconds <= 0) return '0m';
+  if (totalSeconds < 60) return `${totalSeconds}s`;
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  if (seconds === 0) return `${minutes} min`;
-  return `${minutes} min ${seconds} sec`;
+  if (seconds === 0) return `${minutes}m`;
+  return `${minutes}m ${seconds}s`;
 }
 
 export function lateSeverityTone(lateSeconds: number): 'warning' | 'danger' {
@@ -53,17 +58,26 @@ function earliestShiftByEmployee(shifts: ShiftAssignment[]): Map<string, ShiftAs
 export function buildLatecomerRows(
   date: string,
   shifts: ShiftAssignment[],
-  attendance: AttendanceRecord[]
+  attendance: AttendanceRecord[],
+  _rules: AttendanceRules = DEFAULT_ATTENDANCE_RULES
 ): LatecomerRow[] {
   const byEmployee = earliestShiftByEmployee(shifts);
   const rows: LatecomerRow[] = [];
+  const included = new Set<string>();
 
   for (const [employeeId, shift] of byEmployee) {
     const record = attendance.find((r) => r.employeeId === employeeId && r.date === date);
     if (!record?.punchIn) continue;
 
-    const lateSeconds = calcLateSeconds(record.punchIn, shift.startTime);
-    if (lateSeconds <= 0) continue;
+    const lateMinutes =
+      record.lateMinutes != null && record.lateMinutes > 0
+        ? record.lateMinutes
+        : calcLateMinutes(record.punchIn, shift.startTime);
+    if (lateMinutes <= 0) continue;
+
+    included.add(employeeId);
+    const lateSeconds = lateMinutes * 60;
+    const penaltyAmount = Math.max(0, Number(record.penaltyAmount) || 0);
 
     rows.push({
       recordId: record.id,
@@ -72,8 +86,34 @@ export function buildLatecomerRows(
       shiftStart: shift.startTime,
       punchIn: record.punchIn,
       lateSeconds,
+      lateMinutes,
       shiftType: shift.shiftType,
-      penaltyAmount: record.penaltyAmount ?? 0,
+      penaltyAmount,
+    });
+  }
+
+  // Match attendance overview: include stored late minutes even without a shift row that day.
+  for (const record of attendance) {
+    if (record.date !== date || !record.punchIn || included.has(record.employeeId)) continue;
+
+    const lateMinutes =
+      record.lateMinutes != null && record.lateMinutes > 0
+        ? record.lateMinutes
+        : record.lateSeconds != null && record.lateSeconds > 0
+          ? Math.ceil(record.lateSeconds / 60)
+          : 0;
+    if (lateMinutes <= 0) continue;
+
+    rows.push({
+      recordId: record.id,
+      employeeId: record.employeeId,
+      date,
+      shiftStart: '—',
+      punchIn: record.punchIn,
+      lateSeconds: lateMinutes * 60,
+      lateMinutes,
+      shiftType: 'day',
+      penaltyAmount: Math.max(0, Number(record.penaltyAmount) || 0),
     });
   }
 

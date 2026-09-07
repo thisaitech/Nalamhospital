@@ -10,10 +10,14 @@ import type {
 import { findEmployeeById, getEmployeeDisplayName } from '@/services/employeeRegistry';
 import { PAID_LEAVE_QUOTA } from '@/constants/config';
 
-/** Normalize legacy leave types to paid/unpaid buckets. */
+/** Normalize legacy leave types to paid/unpaid buckets (excludes compensatory). */
 export function normalizeLeaveType(type: LeaveType): 'paid' | 'unpaid' {
   if (type === 'unpaid' || type === 'personal') return 'unpaid';
   return 'paid';
+}
+
+export function isCompensatoryLeaveType(type: LeaveType): boolean {
+  return type === 'compensatory';
 }
 
 export function getPaidBalance(balances: LeaveBalance[]): LeaveBalance | undefined {
@@ -41,7 +45,12 @@ export function resolveLeaveType(
 ): { type: 'paid' | 'unpaid'; paidDays: number; unpaidDays: number } {
   const paid = getPaidBalance(balances);
   const pendingPaid = requests
-    .filter((r) => normalizeLeaveType(r.type) === 'paid' && r.status === 'pending')
+    .filter(
+      (r) =>
+        !isCompensatoryLeaveType(r.type) &&
+        normalizeLeaveType(r.type) === 'paid' &&
+        r.status === 'pending'
+    )
     .reduce((sum, r) => sum + r.days, 0);
   const remaining = Math.max(0, (paid?.remaining ?? paid?.total ?? 0) - pendingPaid);
 
@@ -79,7 +88,7 @@ export async function peopleOnLeaveForDate(
       employeeName: employee ? getEmployeeDisplayName(employee) : request.employeeId,
       staffCategory: employee?.staffCategory ?? 'staff',
       department: employee?.department ?? '—',
-      leaveType: normalizeLeaveType(request.type),
+      leaveType: isCompensatoryLeaveType(request.type) ? request.type : normalizeLeaveType(request.type),
       reason: request.reason,
     });
   }
@@ -108,7 +117,7 @@ export async function peopleWithLeaveOnDate(
       employeeName: employee ? getEmployeeDisplayName(employee) : request.employeeId,
       staffCategory: employee?.staffCategory ?? 'staff',
       department: employee?.department ?? '—',
-      leaveType: normalizeLeaveType(request.type),
+      leaveType: isCompensatoryLeaveType(request.type) ? request.type : normalizeLeaveType(request.type),
       reason: request.reason,
       leaveStatus: request.status === 'pending' ? 'pending' : 'approved',
     });
@@ -132,4 +141,114 @@ export function formatLeaveDayLabel(date: string): string {
   } catch {
     return date;
   }
+}
+
+export type ClinicStaffLeaveItem = {
+  requestId: string;
+  employeeId: string;
+  employeeName: string;
+  position: string;
+  leaveType: LeaveType;
+  reason: string;
+  startDate: string;
+  endDate: string;
+  days: number;
+  status: 'pending' | 'approved';
+};
+
+function clinicStaffIds(employees: { employeeId: string; clinicId: string; staffCategory: StaffCategory; deletedAt?: string | null }[], clinicId: string) {
+  return new Set(
+    employees
+      .filter(
+        (e) =>
+          e.clinicId === clinicId &&
+          e.staffCategory === 'staff' &&
+          !e.deletedAt
+      )
+      .map((e) => e.employeeId)
+  );
+}
+
+/** Approved leave for clinic staff covering today (doctor view-only). */
+export function getClinicStaffLeaveToday(params: {
+  clinicId: string;
+  today: string;
+  employees: { employeeId: string; clinicId: string; staffCategory: StaffCategory; deletedAt?: string | null; firstName: string; lastName: string; position: string }[];
+  requests: LeaveRequest[];
+}): ClinicStaffLeaveItem[] {
+  const staffIds = clinicStaffIds(params.employees, params.clinicId);
+  const byId = new Map(params.employees.map((e) => [e.employeeId, e]));
+
+  return params.requests
+    .filter(
+      (r) =>
+        staffIds.has(r.employeeId) &&
+        r.status === 'approved' &&
+        params.today >= r.startDate &&
+        params.today <= r.endDate
+    )
+    .map((r) => {
+      const emp = byId.get(r.employeeId);
+      return {
+        requestId: r.id,
+        employeeId: r.employeeId,
+        employeeName: emp ? getEmployeeDisplayName(emp) : r.employeeId,
+        position: emp?.position ?? '—',
+        leaveType: r.type,
+        reason: r.reason,
+        startDate: r.startDate,
+        endDate: r.endDate,
+        days: r.days,
+        status: 'approved' as const,
+      };
+    })
+    .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+}
+
+/** Pending/approved clinic staff leave starting from tomorrow through the next N days. */
+export function getClinicStaffLeaveUpcoming(params: {
+  clinicId: string;
+  today: string;
+  daysAhead?: number;
+  employees: { employeeId: string; clinicId: string; staffCategory: StaffCategory; deletedAt?: string | null; firstName: string; lastName: string; position: string }[];
+  requests: LeaveRequest[];
+}): ClinicStaffLeaveItem[] {
+  const daysAhead = params.daysAhead ?? 14;
+  const end = new Date(`${params.today}T12:00:00`);
+  end.setDate(end.getDate() + daysAhead);
+  const rangeEnd = format(end, 'yyyy-MM-dd');
+  const tomorrowDate = new Date(`${params.today}T12:00:00`);
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = format(tomorrowDate, 'yyyy-MM-dd');
+
+  const staffIds = clinicStaffIds(params.employees, params.clinicId);
+  const byId = new Map(params.employees.map((e) => [e.employeeId, e]));
+
+  return params.requests
+    .filter((r) => {
+      if (!staffIds.has(r.employeeId)) return false;
+      if (r.status !== 'pending' && r.status !== 'approved') return false;
+      // Overlaps [tomorrow, rangeEnd]
+      return r.startDate <= rangeEnd && r.endDate >= tomorrow;
+    })
+    .map((r) => {
+      const emp = byId.get(r.employeeId);
+      return {
+        requestId: r.id,
+        employeeId: r.employeeId,
+        employeeName: emp ? getEmployeeDisplayName(emp) : r.employeeId,
+        position: emp?.position ?? '—',
+        leaveType: r.type,
+        reason: r.reason,
+        startDate: r.startDate,
+        endDate: r.endDate,
+        days: r.days,
+        status: (r.status === 'pending' ? 'pending' : 'approved') as 'pending' | 'approved',
+      };
+    })
+    .sort((a, b) => {
+      const byDate = a.startDate.localeCompare(b.startDate);
+      if (byDate !== 0) return byDate;
+      return a.employeeName.localeCompare(b.employeeName);
+    });
 }

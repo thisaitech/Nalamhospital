@@ -13,6 +13,7 @@ import type {
   LeaveRequest,
   ShiftAssignment,
 } from '@/types/employee';
+import { mergeAttendanceByDate } from '@/utils/punchSessions';
 
 function isApprovedLeaveOnDate(requests: LeaveRequest[], employeeId: string, date: string): boolean {
   return requests.some(
@@ -32,8 +33,10 @@ export function summarizeAttendanceForPeriod(
   fromDate: string,
   toDate: string
 ): AttendanceSummary {
-  const records = attendance.filter(
-    (r) => r.employeeId === employee.employeeId && r.date >= fromDate && r.date <= toDate
+  const records = mergeAttendanceByDate(
+    attendance.filter(
+      (r) => r.employeeId === employee.employeeId && r.date >= fromDate && r.date <= toDate
+    )
   );
   const empShifts = shifts.filter(
     (s) => s.employeeId === employee.employeeId && s.date >= fromDate && s.date <= toDate
@@ -63,8 +66,9 @@ export function summarizeAttendanceForPeriod(
   let absentDays = 0;
   for (const date of scheduledDates) {
     if (isApprovedLeaveOnDate(leaveRequests, employee.employeeId, date)) continue;
-    const record = records.find((r) => r.date === date);
-    if (!record?.punchIn) {
+    const dayRecords = records.filter((r) => r.date === date);
+    const punched = dayRecords.some((r) => r.punchIn);
+    if (!punched) {
       absentDays += 1;
     }
   }

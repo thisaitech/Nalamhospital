@@ -10,7 +10,9 @@ export const FIRESTORE_COLLECTIONS = {
   SALARY_SLIPS: 'salarySlips',
   PERFORMANCE_REVIEWS: 'performanceReviews',
   SHIFT_ASSIGNMENTS: 'shiftAssignments',
+  CLINICS: 'clinics',
   CLINIC_SETTINGS: 'clinicSettings',
+  COMPENSATORY_CREDITS: 'compensatoryCredits',
 } as const;
 
 /** Bump to force clinic HR seed on next app start when prior seed exists. */

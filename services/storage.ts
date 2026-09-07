@@ -8,6 +8,7 @@ const KEYS = {
   EMPLOYEES: '@workpulse/employees',
   USERS: '@workpulse/users',
   LEAVE_BALANCES: '@workpulse/leave_balances',
+  ADMIN_CLINIC_FILTER: '@hospitalhrm/admin_clinic_filter',
 } as const;
 
 export async function getItem<T>(key: string): Promise<T | null> {
