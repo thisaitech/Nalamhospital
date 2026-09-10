@@ -169,8 +169,32 @@ export async function punchIn(
 
   const today = records.find((r) => r.date === new Date().toISOString().split('T')[0]) ?? records[0];
   assertSameDayPunchIn(today.date);
+
+  const [employee, clinics] = await Promise.all([findEmployeeById(employeeId), loadClinics()]);
+  const splitShiftEnabled = Boolean(employee?.splitShiftEnabled);
+
+  if (splitShiftEnabled && today.splitShiftOnBreak && today.punchIn) {
+    const resumeAt = nowTime();
+    const updated: AttendanceRecord = {
+      ...today,
+      continuePunchIn: resumeAt,
+      splitShiftOnBreak: false,
+      splitShiftBreakAt: today.splitShiftBreakAt ?? today.punchOut,
+      punchInMethod: method,
+      wifiSsid: wifiSsid ?? today.wifiSsid,
+      manualApprovalStatus: method === 'manual' ? 'pending' : today.manualApprovalStatus,
+      ...buildPunchLocationFields(gps, employee?.clinicId, clinics),
+    };
+    await saveAttendanceRecords([updated]);
+    return updated;
+  }
+
   if (today.punchIn && isOpen(today)) {
-    throw new Error('Already punched in — use Continue for the next shift, or Punch Out to finish the day.');
+    throw new Error(
+      splitShiftEnabled
+        ? 'Already punched in — use Break / Punch Out to start your break, or Final Punch Out after the second shift.'
+        : 'Already punched in — use Punch Out to finish the day.'
+    );
   }
   if (today.punchIn && today.punchOut && !isOpen(today)) {
     throw new Error('You already punched out for today. Attendance is complete.');
@@ -185,7 +209,6 @@ export async function punchIn(
   // Punch-in after scheduled start = late (minutes past shift start).
   const lateMinutes = earliestShift ? calcLateMinutes(punchInTime, earliestShift.startTime) : 0;
 
-  const [employee, clinics] = await Promise.all([findEmployeeById(employeeId), loadClinics()]);
   const locationFields = buildPunchLocationFields(gps, employee?.clinicId, clinics);
 
   const updated: AttendanceRecord = {
@@ -196,6 +219,8 @@ export async function punchIn(
     punchOut: null,
     punchOutMethod: null,
     continuePunchIn: null,
+    splitShiftOnBreak: false,
+    splitShiftBreakAt: null,
     hoursWorked: 0,
     lateMinutes,
     lateSeconds: lateMinutes * 60,
@@ -304,6 +329,11 @@ export async function continueNextShift(
   method: PunchMethod,
   wifiSsid: string | null = null
 ): Promise<AttendanceRecord> {
+  const employee = await findEmployeeById(employeeId);
+  if (employee?.splitShiftEnabled) {
+    throw new Error('Split-shift employees must use Break / Punch Out and Resume Shift instead of Continue.');
+  }
+
   const records = await loadAttendance(employeeId);
   const openOvernight = await findOpenOvernightRecord(employeeId, records);
   if (openOvernight) {
@@ -390,6 +420,8 @@ export async function punchOut(employeeId: string, method: PunchMethod): Promise
   const records = await loadAttendance(employeeId);
   const todayKey = new Date().toISOString().split('T')[0];
   const today = records.find((r) => r.date === todayKey) ?? records[0];
+  const employee = await findEmployeeById(employeeId);
+  const splitShiftEnabled = Boolean(employee?.splitShiftEnabled);
 
   let target: AttendanceRecord | null = today && isOpen(today) ? today : null;
   if (!target) {
@@ -397,6 +429,9 @@ export async function punchOut(employeeId: string, method: PunchMethod): Promise
   }
 
   if (!target) {
+    if (splitShiftEnabled && today?.splitShiftOnBreak) {
+      throw new Error('You are on break — tap Punch In to resume your second shift.');
+    }
     throw new Error('You must punch in first');
   }
   if (!target.punchIn) {
@@ -414,6 +449,54 @@ export async function punchOut(employeeId: string, method: PunchMethod): Promise
     ? calcLateMinutes(target.punchIn, earliestShift.startTime)
     : target.lateMinutes ?? 0;
   const status: AttendanceRecord['status'] = lateMinutes > 0 ? 'late' : 'present';
+
+  if (
+    splitShiftEnabled &&
+    target.date === todayKey &&
+    !target.continuePunchIn &&
+    !target.splitShiftOnBreak &&
+    isOpen(target)
+  ) {
+    const segmentStart = target.punchIn;
+    const segmentHours = calcPayablePunchHours(segmentStart, punchOutTime, myShifts);
+    const updated: AttendanceRecord = {
+      ...target,
+      punchOut: punchOutTime,
+      punchOutMethod: method,
+      splitShiftOnBreak: true,
+      splitShiftBreakAt: punchOutTime,
+      continuePunchIn: null,
+      hoursWorked: segmentHours,
+      otHours: 0,
+      lateMinutes,
+      lateSeconds: lateMinutes * 60,
+      status,
+      wifiSsid: target.wifiSsid,
+    };
+    await saveAttendanceRecords([updated]);
+    return updated;
+  }
+
+  if (splitShiftEnabled && target.continuePunchIn && isOpen(target)) {
+    const segmentHours = calcPayablePunchHours(target.continuePunchIn, punchOutTime, myShifts);
+    const segmentOt = calculateOtHours(punchOutTime, myShifts, rules.otStartsAfterHours);
+    const updated: AttendanceRecord = {
+      ...target,
+      punchOut: punchOutTime,
+      punchOutMethod: method,
+      continuePunchIn: null,
+      splitShiftOnBreak: false,
+      hoursWorked: Math.round(((target.hoursWorked || 0) + segmentHours) * 10) / 10,
+      otHours: Math.round(((target.otHours || 0) + segmentOt) * 10) / 10,
+      scheduledHours: scheduledHoursFromAssignments(myShifts) || target.scheduledHours,
+      shiftType: primaryShiftType(myShifts) ?? target.shiftType,
+      lateMinutes,
+      lateSeconds: lateMinutes * 60,
+      status,
+    };
+    await saveAttendanceRecords([updated]);
+    return updated;
+  }
 
   // Continued shift: add this segment's hours onto the same day's totals.
   if (target.continuePunchIn) {

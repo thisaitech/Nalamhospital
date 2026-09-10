@@ -32,6 +32,7 @@ import { getNormalShiftTimings } from '@/services/shiftService';
 import type { Employee, StaffCategory } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
 import { parseLeaveDate } from '@/utils/leaveValidation';
+import { validateSplitShiftTimings } from '@/utils/splitShift';
 
 function showAlert(title: string, message: string, onOk?: () => void) {
   if (Platform.OS === 'web') {
@@ -95,6 +96,9 @@ export default function NewHireScreen() {
     dayShiftEnd: DEFAULT_DAY_SHIFT.end,
     nightShiftStart: DEFAULT_NIGHT_SHIFT.start,
     nightShiftEnd: DEFAULT_NIGHT_SHIFT.end,
+    splitShiftEnabled: false,
+    splitSecondShiftStart: '17:00',
+    splitSecondShiftEnd: '22:00',
   });
 
   const timeOptions = useMemo(() => buildTimeOptions(), []);
@@ -161,6 +165,9 @@ export default function NewHireScreen() {
             : emp.dayShiftEnd || DEFAULT_DAY_SHIFT.end,
           nightShiftStart: emp.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
           nightShiftEnd: emp.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
+          splitShiftEnabled: emp.splitShiftEnabled ?? false,
+          splitSecondShiftStart: emp.splitSecondShiftStart || '17:00',
+          splitSecondShiftEnd: emp.splitSecondShiftEnd || '22:00',
         });
         setClinicId(emp.clinicId ?? '');
         getSupervisors().then((list) => {
@@ -258,6 +265,22 @@ export default function NewHireScreen() {
       );
       return;
     }
+    if (form.splitShiftEnabled) {
+      if (!form.dayShiftEnabled || form.is24HourDuty) {
+        showAlert('Split shift', 'Split Shift / Break Required is only available for day shift employees.');
+        return;
+      }
+      const splitError = validateSplitShiftTimings({
+        firstStart: form.dayShiftStart,
+        firstEnd: form.dayShiftEnd,
+        secondStart: form.splitSecondShiftStart,
+        secondEnd: form.splitSecondShiftEnd,
+      });
+      if (splitError) {
+        showAlert('Invalid split shift timings', splitError);
+        return;
+      }
+    }
 
     const joinDate =
       form.joinDate.length === 10 && parseLeaveDate(form.joinDate)
@@ -292,6 +315,9 @@ export default function NewHireScreen() {
         dayShiftEnd: form.dayShiftEnd,
         nightShiftStart: form.is24HourDuty ? form.dayShiftStart : form.nightShiftStart,
         nightShiftEnd: form.is24HourDuty ? form.dayShiftEnd : form.nightShiftEnd,
+        splitShiftEnabled: form.splitShiftEnabled && form.dayShiftEnabled && !form.is24HourDuty,
+        splitSecondShiftStart: form.splitShiftEnabled ? form.splitSecondShiftStart : undefined,
+        splitSecondShiftEnd: form.splitShiftEnabled ? form.splitSecondShiftEnd : undefined,
         clinicId,
       };
 
@@ -491,6 +517,7 @@ export default function NewHireScreen() {
                   is24HourDuty: false,
                   dayShiftEnabled: false,
                   nightShiftEnabled: true,
+                  splitShiftEnabled: false,
                 }))
               }
             >
@@ -510,6 +537,7 @@ export default function NewHireScreen() {
                   is24HourDuty: true,
                   dayShiftEnabled: true,
                   nightShiftEnabled: false,
+                  splitShiftEnabled: false,
                   // Present window: from 08:00, must mark Present before 10:00 (admin can edit)
                   dayShiftStart: '08:00',
                   dayShiftEnd: '10:00',
@@ -524,7 +552,9 @@ export default function NewHireScreen() {
 
           {form.dayShiftEnabled && !form.is24HourDuty ? (
             <View style={styles.timingBlock}>
-              <Text style={[styles.timingTitle, { color: colors.text }]}>Day shift timing</Text>
+              <Text style={[styles.timingTitle, { color: colors.text }]}>
+                {form.splitShiftEnabled ? 'First shift timing' : 'Day shift timing'}
+              </Text>
               <View style={styles.timingRow}>
                 <View style={styles.timingHalf}>
                   <SelectField
@@ -549,6 +579,58 @@ export default function NewHireScreen() {
                   />
                 </View>
               </View>
+              <Pressable
+                style={styles.splitToggleRow}
+                onPress={() => update('splitShiftEnabled', !form.splitShiftEnabled)}
+              >
+                <View
+                  style={[
+                    styles.splitCheckbox,
+                    {
+                      borderColor: form.splitShiftEnabled ? colors.primary : colors.borderLight,
+                      backgroundColor: form.splitShiftEnabled ? colors.primary : colors.card,
+                    },
+                  ]}
+                >
+                  {form.splitShiftEnabled ? (
+                    <Text style={styles.splitCheckMark}>✓</Text>
+                  ) : null}
+                </View>
+                <Text style={[styles.splitToggleLabel, { color: colors.text }]}>
+                  Split Shift / Break Required
+                </Text>
+              </Pressable>
+              {form.splitShiftEnabled ? (
+                <>
+                  <Text style={[styles.timingTitle, { color: colors.text, marginTop: 8 }]}>
+                    Second shift timing
+                  </Text>
+                  <View style={styles.timingRow}>
+                    <View style={styles.timingHalf}>
+                      <SelectField
+                        label="Start"
+                        value={form.splitSecondShiftStart}
+                        options={timeOptions}
+                        onChange={(v) => update('splitSecondShiftStart', v)}
+                        compact
+                        hideLeadingIcon
+                        {...fieldColors}
+                      />
+                    </View>
+                    <View style={styles.timingHalf}>
+                      <SelectField
+                        label="End"
+                        value={form.splitSecondShiftEnd}
+                        options={timeOptions}
+                        onChange={(v) => update('splitSecondShiftEnd', v)}
+                        compact
+                        hideLeadingIcon
+                        {...fieldColors}
+                      />
+                    </View>
+                  </View>
+                </>
+              ) : null}
             </View>
           ) : null}
 
@@ -710,6 +792,17 @@ const styles = StyleSheet.create({
   timingTitle: { fontSize: 13, fontWeight: '700', marginBottom: 2 },
   timingRow: { flexDirection: 'row', gap: 10 },
   timingHalf: { flex: 1, minWidth: 0 },
+  splitToggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  splitCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  splitCheckMark: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  splitToggleLabel: { fontSize: 13, fontWeight: '700', flex: 1 },
   supervisorList: { gap: 6 },
   supChip: { padding: 10, borderRadius: 12, borderWidth: 1.5 },
   supText: { fontSize: 13, fontWeight: '600' },

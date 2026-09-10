@@ -24,6 +24,7 @@ import {
 } from '@/utils/punchDetails';
 import {
   canContinueNextShift,
+  canResumeSplitShift,
   getTodayAttendance,
   hasPunchedOutToday,
   isShiftOpen,
@@ -55,12 +56,15 @@ export function PunchDetailPanel({ onClose }: PunchDetailPanelProps) {
 
   const todayKey = format(new Date(), 'yyyy-MM-dd');
   const today = getTodayAttendance(attendance, todayKey) ?? attendance[0];
-  const canPunchIn = Boolean(today && !today.punchIn);
+  const splitShiftEnabled = Boolean(employee?.splitShiftEnabled);
+  const canResumeSplit = canResumeSplitShift(today);
+  const canPunchIn = Boolean(today && (!today.punchIn || canResumeSplit));
   const canPunchOut = isShiftOpen(today);
-  const canContinue = canContinueNextShift(attendance, todayKey);
-  const showPunchOutChoiceOnTap = canPunchOut && canContinue;
+  const canContinue = canContinueNextShift(attendance, todayKey, splitShiftEnabled);
+  const showPunchOutChoiceOnTap = false;
   const punchedOutToday = hasPunchedOutToday(attendance, todayKey);
-  const showContinueButton = canContinue || punchedOutToday;
+  const showContinueButton = false;
+  const isSplitSecondSession = Boolean(splitShiftEnabled && today?.continuePunchIn && isShiftOpen(today));
   const employeeName = employee ? `${employee.firstName} ${employee.lastName}` : undefined;
   const detailLines = formatPunchPreviewLines(today, employee);
 
@@ -231,16 +235,32 @@ export function PunchDetailPanel({ onClose }: PunchDetailPanelProps) {
           {canPunchIn ? (
             <>
               <Button
-                title="Punch In via WiFi"
+                title={canResumeSplit ? 'Resume Shift via WiFi' : 'Punch In via WiFi'}
                 onPress={handleWifiPunchIn}
                 loading={loading}
                 disabled={!wifiValid}
               />
-              <Button title="Manual Punch In" variant="outline" onPress={handleManualPunchIn} loading={loading} />
+              <Button
+                title={canResumeSplit ? 'Manual Resume Shift' : 'Manual Punch In'}
+                variant="outline"
+                onPress={handleManualPunchIn}
+                loading={loading}
+              />
             </>
           ) : null}
           {canPunchOut ? (
-            <Button title="Punch Out" variant="danger" onPress={handlePunchOut} loading={loading} />
+            <Button
+              title={
+                splitShiftEnabled
+                  ? isSplitSecondSession
+                    ? 'Final Punch Out'
+                    : 'Break / First Punch Out'
+                  : 'Punch Out'
+              }
+              variant="danger"
+              onPress={handlePunchOut}
+              loading={loading}
+            />
           ) : null}
           {showContinueButton ? (
             <Button title="Continue" variant="outline" onPress={handleContinue} loading={loading} />

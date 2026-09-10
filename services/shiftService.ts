@@ -14,6 +14,10 @@ import {
   loadEmployees,
   updateEmployeePayrollFields,
 } from '@/services/employeeRegistry';
+import {
+  buildProfileShiftAssignments,
+  employeeHasShiftOnDate,
+} from '@/utils/defaultShifts';
 import { get24HourDutyTiming, getEffectiveShiftTiming } from '@/utils/shiftHours';
 import type {
   NormalShiftTimings,
@@ -110,9 +114,44 @@ export async function loadShifts(employeeId?: string): Promise<ShiftAssignment[]
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+async function mergeProfileShiftsForDates(
+  stored: ShiftAssignment[],
+  dates: string[],
+  employeeId?: string
+): Promise<ShiftAssignment[]> {
+  if (dates.length === 0) return stored;
+
+  const employees = await loadEmployees();
+  const scopedEmployees = employees.filter(
+    (employee) => !employee.deletedAt && (!employeeId || employee.employeeId === employeeId)
+  );
+  if (scopedEmployees.length === 0) return stored;
+
+  const changeDates = new Set(await loadShiftChangeDates());
+  const [changeTimings, normalTimings] = await Promise.all([
+    loadShiftChangeTimings(),
+    loadNormalShiftTimings(),
+  ]);
+
+  const merged = [...stored];
+  for (const date of dates) {
+    const isChangeDay = changeDates.has(date);
+    for (const employee of scopedEmployees) {
+      if (employeeHasShiftOnDate(merged, employee.employeeId, date)) continue;
+      merged.push(
+        ...buildProfileShiftAssignments(employee, date, isChangeDay, changeTimings, normalTimings)
+      );
+    }
+  }
+
+  return merged;
+}
+
 export async function loadShiftsForDate(date: string): Promise<ShiftAssignment[]> {
   const all = await loadAllShiftAssignments();
-  return all.filter((s) => s.date === date).sort((a, b) => a.startTime.localeCompare(b.startTime));
+  const stored = all.filter((s) => s.date === date);
+  const merged = await mergeProfileShiftsForDates(stored, [date]);
+  return merged.sort((a, b) => a.startTime.localeCompare(b.startTime));
 }
 
 export async function loadShiftsInRange(
@@ -121,7 +160,7 @@ export async function loadShiftsInRange(
   employeeId?: string
 ): Promise<ShiftAssignment[]> {
   const all = await loadAllShiftAssignments();
-  return all
+  const stored = all
     .filter(
       (s) =>
         s.date >= fromDate &&
@@ -129,6 +168,17 @@ export async function loadShiftsInRange(
         (!employeeId || s.employeeId === employeeId)
     )
     .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+
+  const dates: string[] = [];
+  const cursor = new Date(`${fromDate}T12:00:00`);
+  const end = new Date(`${toDate}T12:00:00`);
+  while (cursor <= end) {
+    dates.push(cursor.toISOString().split('T')[0]);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const merged = await mergeProfileShiftsForDates(stored, dates, employeeId);
+  return merged.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
 }
 
 export async function isShiftChangeDay(date: string): Promise<boolean> {

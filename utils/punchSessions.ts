@@ -8,17 +8,28 @@ export function getTodayAttendance(
   return attendance.find((r) => r.date === todayKey) ?? null;
 }
 
+export function isSplitShiftOnBreak(record: AttendanceRecord | null | undefined): boolean {
+  return Boolean(record?.punchIn && record?.splitShiftOnBreak && !record?.continuePunchIn);
+}
+
 export function isShiftOpen(record: AttendanceRecord | null | undefined): boolean {
   if (!record?.punchIn) return false;
+  if (record.splitShiftOnBreak) return false;
   if (record.continuePunchIn) return true;
   return !record.punchOut;
+}
+
+export function canResumeSplitShift(record: AttendanceRecord | null | undefined): boolean {
+  return isSplitShiftOnBreak(record);
 }
 
 /** Continue is only allowed while a shift is still open — never after a final punch-out. */
 export function canContinueNextShift(
   attendance: AttendanceRecord[],
-  todayKey = new Date().toISOString().split('T')[0]
+  todayKey = new Date().toISOString().split('T')[0],
+  splitShiftEnabled = false
 ): boolean {
+  if (splitShiftEnabled) return false;
   const today = getTodayAttendance(attendance, todayKey);
   return isShiftOpen(today);
 }
@@ -30,7 +41,20 @@ export function hasPunchedOutToday(
 ): boolean {
   const today = getTodayAttendance(attendance, todayKey);
   if (!today?.punchIn || !today.punchOut) return false;
+  if (today.splitShiftOnBreak) return false;
   return !isShiftOpen(today);
+}
+
+export function getSplitShiftPunchStatus(
+  record: AttendanceRecord | null | undefined,
+  splitShiftEnabled: boolean
+): string {
+  if (!splitShiftEnabled || !record?.punchIn) return '';
+  if (isSplitShiftOnBreak(record)) return 'Break / Shift Paused';
+  if (record.continuePunchIn && isShiftOpen(record)) return 'Working - Second Shift';
+  if (isShiftOpen(record)) return 'Working';
+  if (record.punchOut && !record.splitShiftOnBreak && !record.continuePunchIn) return 'Completed';
+  return '';
 }
 
 /** Merge same-day duplicate session rows into one (hours added). */
@@ -79,6 +103,8 @@ export function mergeAttendanceByDate(records: AttendanceRecord[]): AttendanceRe
       otHours: Math.round(((existing.otHours || 0) + (record.otHours || 0)) * 10) / 10,
       scheduledHours: Math.max(existing.scheduledHours || 0, record.scheduledHours || 0),
       continuePunchIn: record.continuePunchIn ?? existing.continuePunchIn ?? null,
+      splitShiftOnBreak: record.splitShiftOnBreak ?? existing.splitShiftOnBreak ?? false,
+      splitShiftBreakAt: record.splitShiftBreakAt ?? existing.splitShiftBreakAt ?? null,
       status:
         existing.status === 'present' || record.status === 'present'
           ? 'present'

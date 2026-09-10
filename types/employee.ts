@@ -56,6 +56,12 @@ export interface Employee {
   nightShiftStart: string;
   /** Individual night-shift end (HH:mm). */
   nightShiftEnd: string;
+  /** Split day into two work sessions with a break between them. */
+  splitShiftEnabled?: boolean;
+  /** Second session start (HH:mm) when splitShiftEnabled. */
+  splitSecondShiftStart?: string;
+  /** Second session end (HH:mm) when splitShiftEnabled. */
+  splitSecondShiftEnd?: string;
   /** Assigned clinic location. */
   clinicId: string;
   /** Cached clinic name for list display. */
@@ -94,6 +100,10 @@ export interface AttendanceRecord {
    * Punch-out for this segment adds hours into the same day's record (one history row).
    */
   continuePunchIn?: string | null;
+  /** Split-shift employee is on break between first and second session. */
+  splitShiftOnBreak?: boolean;
+  /** Time of first-session punch-out (break start); kept for history after final out. */
+  splitShiftBreakAt?: string | null;
   status: 'present' | 'absent' | 'half-day' | 'late' | 'on-leave';
   manualApprovalStatus?: 'pending' | 'approved' | 'rejected';
   shiftType?: ShiftType | 'both' | null;
@@ -249,6 +259,9 @@ export interface NewHireInput {
   nightShiftStart: string;
   nightShiftEnd: string;
   is24HourDuty?: boolean;
+  splitShiftEnabled?: boolean;
+  splitSecondShiftStart?: string;
+  splitSecondShiftEnd?: string;
   clinicId: string;
 }
 

@@ -20,10 +20,13 @@ import { verifyOfficeWifi } from '@/services/wifiService';
 import { formatDisplayTime } from '@/utils/formatTime';
 import {
   canContinueNextShift,
+  canResumeSplitShift,
+  getSplitShiftPunchStatus,
   getTodayAttendance,
   hasPunchedOutToday,
   isShiftOpen,
 } from '@/utils/punchSessions';
+import { formatSplitShiftTimingLabel } from '@/utils/splitShift';
 import { getDoctorPresentUi } from '@/utils/doctorPresent';
 import { useColorScheme } from '@/components/useColorScheme';
 
@@ -171,14 +174,20 @@ export default function DashboardScreen() {
     return prior;
   }, [attendance, yesterdayKey]);
 
-  const activePunch = today && isShiftOpen(today) ? today : openOvernight;
-  const canFirstPunchIn = Boolean(!openOvernight && today && !today.punchIn);
+  const splitShiftEnabled = Boolean(employee?.splitShiftEnabled);
+  const canResumeSplit = canResumeSplitShift(today);
+  const activePunch =
+    today && isShiftOpen(today) ? today : today?.splitShiftOnBreak ? null : openOvernight;
+  const canFirstPunchIn = Boolean(
+    today && (!today.punchIn || canResumeSplit) && (canResumeSplit || !openOvernight)
+  );
   const canPunchOut = Boolean(activePunch && isShiftOpen(activePunch));
-  const canContinue = canContinueNextShift(attendance, todayKey) && !openOvernight;
-  const showPunchOutChoiceOnTap = canPunchOut && canContinue && !openOvernight;
+  const canContinue = canContinueNextShift(attendance, todayKey, splitShiftEnabled) && !openOvernight;
+  const showPunchOutChoiceOnTap = false;
   const punchedOutToday = hasPunchedOutToday(attendance, todayKey) && !openOvernight;
-  /** Keep Continue visible after punch-out; tap then shows a red alert. */
-  const showContinueButton = (canContinue || punchedOutToday) && !openOvernight;
+  const showContinueButton = false;
+  const splitShiftStatus = getSplitShiftPunchStatus(today, splitShiftEnabled);
+  const isSplitSecondSession = Boolean(splitShiftEnabled && today?.continuePunchIn && isShiftOpen(today));
 
   const doctorPresentUi = useMemo(
     () => getDoctorPresentUi({ employee, today }),
@@ -268,17 +277,19 @@ export default function DashboardScreen() {
         : doctorPresentUi.mode === 'available'
           ? 'Mark present'
           : 'Waiting'
-    : activePunch && isShiftOpen(activePunch)
-    ? openOvernight
-      ? 'Overnight'
-      : today?.continuePunchIn
-        ? 'Continued'
-        : 'Active'
-    : today?.punchOut
-      ? canContinue
-        ? 'Ready'
-        : 'Done'
-      : 'Away';
+    : splitShiftStatus
+      ? splitShiftStatus
+      : activePunch && isShiftOpen(activePunch)
+        ? openOvernight
+          ? 'Overnight'
+          : today?.continuePunchIn
+            ? 'Continued'
+            : 'Active'
+        : today?.punchOut
+          ? canContinue
+            ? 'Ready'
+            : 'Done'
+          : 'Away';
 
   const todayShiftKind = useMemo((): 'day' | 'night' | '24h' => {
     if (employee?.is24HourDuty) return '24h';
@@ -316,6 +327,8 @@ export default function DashboardScreen() {
       return `${assigned.startTime}–${assigned.endTime}`;
     }
     if (!employee) return null;
+    const splitLabel = formatSplitShiftTimingLabel(employee);
+    if (splitLabel) return splitLabel;
     if (employee.is24HourDuty) {
       return `${employee.dayShiftStart || '08:00'}–${employee.dayShiftEnd || '08:00'}`;
     }
@@ -336,11 +349,15 @@ export default function DashboardScreen() {
       : canPunchOut
       ? openOvernight
         ? 'Punch Out (overnight)'
-        : today?.continuePunchIn
-          ? 'Punch Out'
+        : splitShiftEnabled
+          ? isSplitSecondSession
+            ? 'Final Punch Out'
+            : 'Break / First Punch Out'
           : 'Punch Out'
       : canFirstPunchIn
-        ? 'Punch In Now'
+        ? canResumeSplit
+          ? 'Resume Shift'
+          : 'Punch In Now'
         : 'Done for today';
 
   const heroHint = is24HourDoctorHome
@@ -354,12 +371,20 @@ export default function DashboardScreen() {
     : canPunchOut
     ? openOvernight
       ? 'Finish yesterday’s overnight / change-day shift'
-      : today?.continuePunchIn
-        ? 'Continued shift in progress — tap Punch Out to finish'
-        : 'Tap Punch Out — choose Continue or Punch Out'
+      : splitShiftEnabled
+        ? isSplitSecondSession
+          ? 'Second shift in progress — tap Final Punch Out when done'
+          : 'First shift in progress — tap Break / First Punch Out when leaving for break'
+        : today?.continuePunchIn
+          ? 'Continued shift in progress — tap Punch Out to finish'
+          : 'Tap Punch Out to finish your shift'
     : canFirstPunchIn
-      ? 'Tap below to punch in'
-      : 'Attendance completed for today';
+      ? canResumeSplit
+        ? 'Tap below to resume your second shift'
+        : 'Tap below to punch in'
+      : splitShiftStatus === 'Break / Shift Paused'
+        ? 'On break — resume when your second shift starts'
+        : 'Attendance completed for today';
 
   const performPunchOut = async () => {
     setPunchLoading(true);
@@ -368,10 +393,22 @@ export default function DashboardScreen() {
       const method = result.valid ? 'wifi' : 'manual';
       const record = await doPunchOut(method);
       if (record) {
-        showPunchAlert(
-          'Punched Out',
-          `Recorded at ${formatDisplayTime(record.punchOut)}${record.hoursWorked ? ` · ${record.hoursWorked}h total attended` : ''}`
-        );
+        if (record.splitShiftOnBreak) {
+          showPunchAlert(
+            'Break started',
+            `First shift ended at ${formatDisplayTime(record.punchOut)}. Resume when your second shift starts.`
+          );
+        } else if (splitShiftEnabled && record.punchOut && !record.continuePunchIn && !record.splitShiftOnBreak) {
+          showPunchAlert(
+            'Day completed',
+            `Final punch out at ${formatDisplayTime(record.punchOut)}${record.hoursWorked ? ` · ${record.hoursWorked}h total attended` : ''}`
+          );
+        } else {
+          showPunchAlert(
+            'Punched Out',
+            `Recorded at ${formatDisplayTime(record.punchOut)}${record.hoursWorked ? ` · ${record.hoursWorked}h total attended` : ''}`
+          );
+        }
       }
     } catch (e) {
       showPunchAlert('Error', e instanceof Error ? e.message : 'Punch out failed');
@@ -411,6 +448,13 @@ export default function DashboardScreen() {
           ? await doPunchIn('wifi', result.ssid)
           : await doPunchIn('manual', null);
         if (record) {
+          if (canResumeSplit) {
+            showPunchAlert(
+              'Shift resumed',
+              `Second shift started at ${formatDisplayTime(record.continuePunchIn)}`
+            );
+            return;
+          }
           if (record.locationApprovalStatus === 'pending') {
             showPunchAlert(
               'Punched In',
@@ -610,9 +654,19 @@ export default function DashboardScreen() {
                       ? ' · overnight still open'
                       : ' · still working'}
                 </Text>
+              ) : today?.splitShiftOnBreak ? (
+                <Text style={styles.heroTime}>
+                  Break since {formatDisplayTime(today.punchOut)}
+                  {today.splitShiftBreakAt ? ` · first shift ended ${formatDisplayTime(today.splitShiftBreakAt)}` : ''}
+                </Text>
               ) : today?.punchOut ? (
                 <Text style={styles.heroTime}>
-                  {formatDisplayTime(today.punchIn)} → {formatDisplayTime(today.punchOut)}
+                  {formatDisplayTime(today.punchIn)}
+                  {today.splitShiftBreakAt ? ` → ${formatDisplayTime(today.splitShiftBreakAt)}` : ''}
+                  {today.continuePunchIn ? ` · resumed ${formatDisplayTime(today.continuePunchIn)}` : ''}
+                  {today.punchOut && !today.splitShiftOnBreak
+                    ? ` → ${formatDisplayTime(today.punchOut)}`
+                    : ''}
                   {today.hoursWorked > 0 ? ` · ${today.hoursWorked}h` : ''}
                 </Text>
               ) : (
@@ -933,6 +987,7 @@ export default function DashboardScreen() {
                 ]}
               >
                 {shift.startTime} – {shift.endTime}
+                {shift.notes ? ` · ${shift.notes}` : ''}
               </Text>
             </Card>
           );

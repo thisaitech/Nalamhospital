@@ -92,6 +92,9 @@ function withEmployeeDefaults(raw: Employee): Employee {
     dayShiftEnd: raw.dayShiftEnd ?? '20:00',
     nightShiftStart: raw.nightShiftStart ?? '20:00',
     nightShiftEnd: raw.nightShiftEnd ?? '08:00',
+    splitShiftEnabled: raw.splitShiftEnabled ?? false,
+    splitSecondShiftStart: raw.splitSecondShiftStart,
+    splitSecondShiftEnd: raw.splitSecondShiftEnd,
     clinicId: raw.clinicId ?? DEFAULT_CLINIC_ID,
     clinicName: raw.clinicName,
     deletedAt: raw.deletedAt ?? null,
@@ -104,6 +107,8 @@ function withAttendanceDefaults(raw: AttendanceRecord): AttendanceRecord {
     otHours: raw.otHours ?? 0,
     scheduledHours: raw.scheduledHours ?? 0,
     continuePunchIn: raw.continuePunchIn ?? null,
+    splitShiftOnBreak: raw.splitShiftOnBreak ?? false,
+    splitShiftBreakAt: raw.splitShiftBreakAt ?? null,
   };
 }
 

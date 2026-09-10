@@ -120,6 +120,9 @@ export async function createNewHire(input: NewHireInput): Promise<Employee> {
       : input.dayShiftEnd || DEFAULT_DAY_SHIFT.end,
     nightShiftStart: input.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
     nightShiftEnd: input.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
+    splitShiftEnabled: !!input.splitShiftEnabled,
+    splitSecondShiftStart: input.splitShiftEnabled ? input.splitSecondShiftStart : undefined,
+    splitSecondShiftEnd: input.splitShiftEnabled ? input.splitSecondShiftEnd : undefined,
     clinicId,
     clinicName: clinic?.name,
   };
@@ -197,6 +200,9 @@ export async function updateNewHire(employeeId: string, input: NewHireInput): Pr
       : input.dayShiftEnd || DEFAULT_DAY_SHIFT.end,
     nightShiftStart: input.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
     nightShiftEnd: input.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
+    splitShiftEnabled: !!input.splitShiftEnabled,
+    splitSecondShiftStart: input.splitShiftEnabled ? input.splitSecondShiftStart : undefined,
+    splitSecondShiftEnd: input.splitShiftEnabled ? input.splitSecondShiftEnd : undefined,
     clinicId,
     clinicName: clinic?.name,
   };

@@ -12,6 +12,8 @@ import { getCurrentWifiInfo, verifyOfficeWifi } from '@/services/wifiService';
 import { formatDisplayTime } from '@/utils/formatTime';
 import {
   canContinueNextShift,
+  canResumeSplitShift,
+  getSplitShiftPunchStatus,
   getTodayAttendance,
   hasPunchedOutToday,
   isShiftOpen,
@@ -32,12 +34,16 @@ export default function AttendanceScreen() {
   const todayKey = format(new Date(), 'yyyy-MM-dd');
   const today = getTodayAttendance(attendance, todayKey);
   const is24HourDoctor = Boolean(employee?.is24HourDuty);
-  const canPunchIn = !is24HourDoctor && Boolean(today && !today.punchIn);
+  const splitShiftEnabled = Boolean(employee?.splitShiftEnabled);
+  const canResumeSplit = canResumeSplitShift(today);
+  const canPunchIn = !is24HourDoctor && Boolean(today && (!today.punchIn || canResumeSplit));
   const canPunchOut = !is24HourDoctor && isShiftOpen(today);
-  const canContinue = !is24HourDoctor && canContinueNextShift(attendance, todayKey);
-  const showPunchOutChoiceOnTap = canPunchOut && canContinue;
+  const canContinue = !is24HourDoctor && canContinueNextShift(attendance, todayKey, splitShiftEnabled);
+  const showPunchOutChoiceOnTap = false;
   const punchedOutToday = !is24HourDoctor && hasPunchedOutToday(attendance, todayKey);
-  const showContinueButton = canContinue || punchedOutToday;
+  const showContinueButton = false;
+  const splitShiftStatus = getSplitShiftPunchStatus(today, splitShiftEnabled);
+  const isSplitSecondSession = Boolean(splitShiftEnabled && today?.continuePunchIn && isShiftOpen(today));
 
   const checkWifi = useCallback(async () => {
     await getCurrentWifiInfo();
@@ -91,10 +97,22 @@ export default function AttendanceScreen() {
       const result = await verifyOfficeWifi();
       const method = result.valid ? 'wifi' : 'manual';
       const record = await doPunchOut(method);
-      showAlert(
-        'Punched Out',
-        `Total attended today: ${record?.hoursWorked ?? 0}h.`
-      );
+      if (record?.splitShiftOnBreak) {
+        showAlert(
+          'Break started',
+          `First shift ended at ${formatDisplayTime(record.punchOut)}. Resume when your second shift starts.`
+        );
+      } else if (splitShiftEnabled && record?.punchOut && !record.splitShiftOnBreak) {
+        showAlert(
+          'Day completed',
+          `Total attended today: ${record.hoursWorked ?? 0}h.`
+        );
+      } else {
+        showAlert(
+          'Punched Out',
+          `Total attended today: ${record?.hoursWorked ?? 0}h.`
+        );
+      }
     } catch (e) {
       showAlert('Error', e instanceof Error ? e.message : 'Punch out failed');
     } finally {
@@ -173,15 +191,24 @@ export default function AttendanceScreen() {
           <View style={styles.todayPunchBlock}>
             <Text style={[styles.punchLabel, { color: colors.textSecondary }]}>Punch Out</Text>
             <Text style={[styles.todayPunchTime, { color: colors.text }]}>
-              {today?.continuePunchIn ? '—' : formatDisplayTime(today?.punchOut)}
+              {today?.splitShiftOnBreak
+                ? formatDisplayTime(today?.punchOut)
+                : today?.continuePunchIn && isShiftOpen(today)
+                  ? '—'
+                  : formatDisplayTime(today?.punchOut)}
             </Text>
-            {today?.continuePunchIn ? (
-              <StatusBadge label="continued" tone="primary" />
+            {today?.splitShiftOnBreak ? (
+              <StatusBadge label="on break" tone="warning" />
+            ) : today?.continuePunchIn ? (
+              <StatusBadge label="second shift" tone="primary" />
             ) : today?.punchOutMethod ? (
               <StatusBadge label={today.punchOutMethod} tone="primary" />
             ) : null}
           </View>
         </View>
+        {splitShiftStatus ? (
+          <Text style={[styles.hours, { color: colors.textSecondary }]}>Status: {splitShiftStatus}</Text>
+        ) : null}
         {today?.continuePunchIn ? (
           <Text style={[styles.hours, { color: colors.textSecondary }]}>
             Continued at {formatDisplayTime(today.continuePunchIn)} · prior total {today.hoursWorked || 0}h
@@ -207,13 +234,13 @@ export default function AttendanceScreen() {
         {canPunchIn && (
           <>
             <Button
-              title="Punch In via WiFi"
+              title={canResumeSplit ? 'Resume Shift via WiFi' : 'Punch In via WiFi'}
               onPress={handleWifiPunchIn}
               loading={loading}
               disabled={!wifiValid}
             />
             <Button
-              title="Manual Punch In"
+              title={canResumeSplit ? 'Manual Resume Shift' : 'Manual Punch In'}
               variant="outline"
               onPress={handleManualPunchIn}
               loading={loading}
@@ -222,7 +249,18 @@ export default function AttendanceScreen() {
           </>
         )}
         {canPunchOut && (
-          <Button title="Punch Out" variant="danger" onPress={handlePunchOut} loading={loading} />
+          <Button
+            title={
+              splitShiftEnabled
+                ? isSplitSecondSession
+                  ? 'Final Punch Out'
+                  : 'Break / First Punch Out'
+                : 'Punch Out'
+            }
+            variant="danger"
+            onPress={handlePunchOut}
+            loading={loading}
+          />
         )}
         {showContinueButton && (
           <Button

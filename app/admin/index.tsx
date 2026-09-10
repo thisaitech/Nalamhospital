@@ -123,6 +123,7 @@ export default function AdminDashboard() {
             <Text style={[styles.name, { color: colors.text }]}>{row.name}</Text>
             <Text style={[styles.meta, { color: colors.textSecondary }]}>
               {row.shiftType.toUpperCase()} · {row.startTime}–{row.endTime} · {row.category}
+              {row.notes ? ` · ${row.notes}` : ''}
             </Text>
           </Card>
         ))
