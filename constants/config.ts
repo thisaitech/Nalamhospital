@@ -26,6 +26,8 @@ export const PAID_LEAVE_QUOTA = {
 /** Clinic standard shifts: 8 AM–8 PM and 8 PM–8 AM. */
 export const DEFAULT_DAY_SHIFT = { start: '08:00', end: '20:00' };
 export const DEFAULT_NIGHT_SHIFT = { start: '20:00', end: '08:00' };
+/** Default second session when Split Shift / Break Required is enabled. */
+export const DEFAULT_SPLIT_SECOND_SHIFT = { start: '17:00', end: '22:00' };
 /** 24-hour duty window (same start/end time = full day). */
 export const DEFAULT_FULL_DAY_SHIFT = { start: '08:00', end: '08:00' };
 

@@ -21,6 +21,7 @@ import Colors from '@/constants/Colors';
 import {
   DEFAULT_DAY_SHIFT,
   DEFAULT_NIGHT_SHIFT,
+  DEFAULT_SPLIT_SECOND_SHIFT,
 } from '@/constants/config';
 import {
   DEPARTMENT_OPTIONS,
@@ -32,7 +33,6 @@ import { getNormalShiftTimings } from '@/services/shiftService';
 import type { Employee, StaffCategory } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
 import { parseLeaveDate } from '@/utils/leaveValidation';
-import { validateSplitShiftTimings } from '@/utils/splitShift';
 
 function showAlert(title: string, message: string, onOk?: () => void) {
   if (Platform.OS === 'web') {
@@ -97,8 +97,6 @@ export default function NewHireScreen() {
     nightShiftStart: DEFAULT_NIGHT_SHIFT.start,
     nightShiftEnd: DEFAULT_NIGHT_SHIFT.end,
     splitShiftEnabled: false,
-    splitSecondShiftStart: '17:00',
-    splitSecondShiftEnd: '22:00',
   });
 
   const timeOptions = useMemo(() => buildTimeOptions(), []);
@@ -166,8 +164,6 @@ export default function NewHireScreen() {
           nightShiftStart: emp.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
           nightShiftEnd: emp.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
           splitShiftEnabled: emp.splitShiftEnabled ?? false,
-          splitSecondShiftStart: emp.splitSecondShiftStart || '17:00',
-          splitSecondShiftEnd: emp.splitSecondShiftEnd || '22:00',
         });
         setClinicId(emp.clinicId ?? '');
         getSupervisors().then((list) => {
@@ -270,14 +266,8 @@ export default function NewHireScreen() {
         showAlert('Split shift', 'Split Shift / Break Required is only available for day shift employees.');
         return;
       }
-      const splitError = validateSplitShiftTimings({
-        firstStart: form.dayShiftStart,
-        firstEnd: form.dayShiftEnd,
-        secondStart: form.splitSecondShiftStart,
-        secondEnd: form.splitSecondShiftEnd,
-      });
-      if (splitError) {
-        showAlert('Invalid split shift timings', splitError);
+      if (form.dayShiftStart.slice(0, 5) >= form.dayShiftEnd.slice(0, 5)) {
+        showAlert('Invalid day shift timing', 'Day shift end must be after day shift start.');
         return;
       }
     }
@@ -316,8 +306,8 @@ export default function NewHireScreen() {
         nightShiftStart: form.is24HourDuty ? form.dayShiftStart : form.nightShiftStart,
         nightShiftEnd: form.is24HourDuty ? form.dayShiftEnd : form.nightShiftEnd,
         splitShiftEnabled: form.splitShiftEnabled && form.dayShiftEnabled && !form.is24HourDuty,
-        splitSecondShiftStart: form.splitShiftEnabled ? form.splitSecondShiftStart : undefined,
-        splitSecondShiftEnd: form.splitShiftEnabled ? form.splitSecondShiftEnd : undefined,
+        splitSecondShiftStart: form.splitShiftEnabled ? DEFAULT_SPLIT_SECOND_SHIFT.start : undefined,
+        splitSecondShiftEnd: form.splitShiftEnabled ? DEFAULT_SPLIT_SECOND_SHIFT.end : undefined,
         clinicId,
       };
 
@@ -552,9 +542,7 @@ export default function NewHireScreen() {
 
           {form.dayShiftEnabled && !form.is24HourDuty ? (
             <View style={styles.timingBlock}>
-              <Text style={[styles.timingTitle, { color: colors.text }]}>
-                {form.splitShiftEnabled ? 'First shift timing' : 'Day shift timing'}
-              </Text>
+              <Text style={[styles.timingTitle, { color: colors.text }]}>Day shift timing</Text>
               <View style={styles.timingRow}>
                 <View style={styles.timingHalf}>
                   <SelectField
@@ -600,37 +588,6 @@ export default function NewHireScreen() {
                   Split Shift / Break Required
                 </Text>
               </Pressable>
-              {form.splitShiftEnabled ? (
-                <>
-                  <Text style={[styles.timingTitle, { color: colors.text, marginTop: 8 }]}>
-                    Second shift timing
-                  </Text>
-                  <View style={styles.timingRow}>
-                    <View style={styles.timingHalf}>
-                      <SelectField
-                        label="Start"
-                        value={form.splitSecondShiftStart}
-                        options={timeOptions}
-                        onChange={(v) => update('splitSecondShiftStart', v)}
-                        compact
-                        hideLeadingIcon
-                        {...fieldColors}
-                      />
-                    </View>
-                    <View style={styles.timingHalf}>
-                      <SelectField
-                        label="End"
-                        value={form.splitSecondShiftEnd}
-                        options={timeOptions}
-                        onChange={(v) => update('splitSecondShiftEnd', v)}
-                        compact
-                        hideLeadingIcon
-                        {...fieldColors}
-                      />
-                    </View>
-                  </View>
-                </>
-              ) : null}
             </View>
           ) : null}
 

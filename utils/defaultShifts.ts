@@ -1,3 +1,4 @@
+import { DEFAULT_SPLIT_SECOND_SHIFT } from '@/constants/config';
 import type {
   Employee,
   NormalShiftTimings,
@@ -44,8 +45,9 @@ export function buildProfileShiftAssignments(
 
   if (employee.splitShiftEnabled && employee.dayShiftEnabled) {
     const first = getEffectiveShiftTiming(employee, 'day', isChangeDay, changeTimings, normalTimings);
-    const secondStart = employee.splitSecondShiftStart?.slice(0, 5) ?? '17:00';
-    const secondEnd = employee.splitSecondShiftEnd?.slice(0, 5) ?? '22:00';
+    const secondStart =
+      employee.splitSecondShiftStart?.slice(0, 5) ?? DEFAULT_SPLIT_SECOND_SHIFT.start;
+    const secondEnd = employee.splitSecondShiftEnd?.slice(0, 5) ?? DEFAULT_SPLIT_SECOND_SHIFT.end;
     return [
       profileShift(employee, date, 'day', first.start, first.end, 'day', 'Split · first shift'),
       profileShift(employee, date, 'day', secondStart, secondEnd, 'split2', 'Split · second shift'),
