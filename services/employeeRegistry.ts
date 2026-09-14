@@ -2,6 +2,7 @@ import {
   DEFAULT_DAY_SHIFT,
   DEFAULT_FULL_DAY_SHIFT,
   DEFAULT_NIGHT_SHIFT,
+  DEFAULT_SPLIT_SECOND_SHIFT,
 } from '@/constants/config';
 import {
   createNewHireRecords,
@@ -121,8 +122,13 @@ export async function createNewHire(input: NewHireInput): Promise<Employee> {
     nightShiftStart: input.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
     nightShiftEnd: input.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
     splitShiftEnabled: !!input.splitShiftEnabled,
-    splitSecondShiftStart: input.splitShiftEnabled ? input.splitSecondShiftStart : undefined,
-    splitSecondShiftEnd: input.splitShiftEnabled ? input.splitSecondShiftEnd : undefined,
+    ...(input.splitShiftEnabled
+      ? {
+          splitSecondShiftStart:
+            input.splitSecondShiftStart ?? DEFAULT_SPLIT_SECOND_SHIFT.start,
+          splitSecondShiftEnd: input.splitSecondShiftEnd ?? DEFAULT_SPLIT_SECOND_SHIFT.end,
+        }
+      : {}),
     clinicId,
     clinicName: clinic?.name,
   };
@@ -201,8 +207,18 @@ export async function updateNewHire(employeeId: string, input: NewHireInput): Pr
     nightShiftStart: input.nightShiftStart || DEFAULT_NIGHT_SHIFT.start,
     nightShiftEnd: input.nightShiftEnd || DEFAULT_NIGHT_SHIFT.end,
     splitShiftEnabled: !!input.splitShiftEnabled,
-    splitSecondShiftStart: input.splitShiftEnabled ? input.splitSecondShiftStart : undefined,
-    splitSecondShiftEnd: input.splitShiftEnabled ? input.splitSecondShiftEnd : undefined,
+    ...(input.splitShiftEnabled
+      ? {
+          splitSecondShiftStart:
+            input.splitSecondShiftStart ??
+            employee.splitSecondShiftStart ??
+            DEFAULT_SPLIT_SECOND_SHIFT.start,
+          splitSecondShiftEnd:
+            input.splitSecondShiftEnd ??
+            employee.splitSecondShiftEnd ??
+            DEFAULT_SPLIT_SECOND_SHIFT.end,
+        }
+      : {}),
     clinicId,
     clinicName: clinic?.name,
   };

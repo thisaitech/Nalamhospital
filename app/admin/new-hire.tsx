@@ -306,8 +306,12 @@ export default function NewHireScreen() {
         nightShiftStart: form.is24HourDuty ? form.dayShiftStart : form.nightShiftStart,
         nightShiftEnd: form.is24HourDuty ? form.dayShiftEnd : form.nightShiftEnd,
         splitShiftEnabled: form.splitShiftEnabled && form.dayShiftEnabled && !form.is24HourDuty,
-        splitSecondShiftStart: form.splitShiftEnabled ? DEFAULT_SPLIT_SECOND_SHIFT.start : undefined,
-        splitSecondShiftEnd: form.splitShiftEnabled ? DEFAULT_SPLIT_SECOND_SHIFT.end : undefined,
+        ...(form.splitShiftEnabled && form.dayShiftEnabled && !form.is24HourDuty
+          ? {
+              splitSecondShiftStart: DEFAULT_SPLIT_SECOND_SHIFT.start,
+              splitSecondShiftEnd: DEFAULT_SPLIT_SECOND_SHIFT.end,
+            }
+          : {}),
         clinicId,
       };
 

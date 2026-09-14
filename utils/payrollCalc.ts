@@ -50,6 +50,10 @@ export function buildPayslip(params: {
   unpaidLeaveDays: number;
   compensatoryLeaveDays?: number;
   lateFine?: number;
+  lateDays?: number;
+  lateMinutes?: number;
+  latePercentage?: number;
+  lateDeductionPerDay?: number;
   clinicOtMultiplier?: number;
   status?: 'paid' | 'pending';
 }): SalarySlip {
@@ -61,6 +65,10 @@ export function buildPayslip(params: {
     unpaidLeaveDays,
     compensatoryLeaveDays = 0,
     lateFine = 0,
+    lateDays = 0,
+    lateMinutes = 0,
+    latePercentage = 0,
+    lateDeductionPerDay = 0,
     clinicOtMultiplier = 1.5,
     status = 'pending',
   } = params;
@@ -82,7 +90,7 @@ export function buildPayslip(params: {
   const basic = Math.round(summary.attendedHours * hr * 100) / 100;
   const allowances = Math.round((busFare + otPay + compensatoryAllowance) * 100) / 100;
   const deductions = Math.round((unpaidLeaveDeduction + lateFineAmount) * 100) / 100;
-  const netPay = Math.round((basic + allowances - deductions) * 100) / 100;
+  const netPay = Math.max(0, Math.round((basic + allowances - deductions) * 100) / 100);
 
   const lastDay = new Date(
     year,
@@ -125,6 +133,10 @@ export function buildPayslip(params: {
     unpaidLeaveDeduction,
     absentDeduction,
     lateFine: lateFineAmount,
+    lateDays,
+    lateMinutes,
+    latePercentage,
+    lateDeductionPerDay,
     compensatoryLeaveDays,
     compensatoryAllowance,
   };

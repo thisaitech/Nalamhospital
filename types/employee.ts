@@ -210,6 +210,14 @@ export interface SalarySlip {
   absentDeduction?: number;
   /** Sum of auto late fines for the period. */
   lateFine?: number;
+  /** Days with a late punch-in during the month. */
+  lateDays?: number;
+  /** Total late minutes during the month. */
+  lateMinutes?: number;
+  /** Late days as a percentage of scheduled shift days. */
+  latePercentage?: number;
+  /** Admin-entered ₹ per late day used when this payslip was generated. */
+  lateDeductionPerDay?: number;
   compensatoryLeaveDays?: number;
   compensatoryAllowance?: number;
 }

@@ -11,12 +11,31 @@ import { loadShiftsInRange } from '@/services/shiftService';
 import { monthDateRange, summarizeAttendanceForPeriod } from '@/utils/attendanceSummary';
 import { buildPayslip, countUnpaidLeaveDays } from '@/utils/payrollCalc';
 import { countCompensatoryLeaveDays } from '@/utils/compensatoryLeave';
+import {
+  calcManualLateDeduction,
+  calcMonthlyLateStats,
+  type MonthlyLateStats,
+} from '@/utils/monthlyLateStats';
 import type { SalarySlip } from '@/types/employee';
+
+export async function getEmployeeLateStatsForMonth(
+  employeeId: string,
+  year: number,
+  monthIndex: number
+): Promise<MonthlyLateStats> {
+  const { fromDate, toDate } = monthDateRange(year, monthIndex);
+  const [attendance, shifts] = await Promise.all([
+    loadAllAttendance(),
+    loadShiftsInRange(fromDate, toDate),
+  ]);
+  return calcMonthlyLateStats(employeeId, attendance, shifts, fromDate, toDate);
+}
 
 export async function generatePayrollForMonth(
   year: number,
   monthIndex: number,
-  employeeId?: string
+  employeeId?: string,
+  lateDeductionPerDay = 0
 ): Promise<SalarySlip[]> {
   const month = MONTH_NAMES[monthIndex];
   if (!month) throw new Error('Invalid month');
@@ -60,13 +79,15 @@ export async function generatePayrollForMonth(
       toDate
     );
 
-    // Late fine = sum of admin-entered penalty amounts only (not auto slabs).
-    const lateFine = attendance
-      .filter(
-        (r) =>
-          r.employeeId === employee.employeeId && r.date >= fromDate && r.date <= toDate
-      )
-      .reduce((sum, r) => sum + Math.max(0, Number(r.penaltyAmount) || 0), 0);
+    const lateStats = calcMonthlyLateStats(
+      employee.employeeId,
+      attendance,
+      shifts,
+      fromDate,
+      toDate
+    );
+    const perDay = Math.max(0, Number(lateDeductionPerDay) || 0);
+    const lateFine = calcManualLateDeduction(lateStats.lateDays, perDay);
 
     return buildPayslip({
       employee,
@@ -76,6 +97,10 @@ export async function generatePayrollForMonth(
       unpaidLeaveDays,
       compensatoryLeaveDays,
       lateFine,
+      lateDays: lateStats.lateDays,
+      lateMinutes: lateStats.lateMinutes,
+      latePercentage: lateStats.latePercentage,
+      lateDeductionPerDay: perDay,
       clinicOtMultiplier: rules.otMultiplier,
       status: 'pending',
     });

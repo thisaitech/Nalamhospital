@@ -246,7 +246,12 @@ interface AppContextValue {
   loadShiftChangeDates: () => Promise<string[]>;
   completeShiftChangeSwap: (date: string) => Promise<number>;
   getAttendanceSummaries: (year: number, monthIndex: number) => Promise<AttendanceSummary[]>;
-  generatePayroll: (year: number, monthIndex: number, employeeId?: string) => Promise<SalarySlip[]>;
+  generatePayroll: (
+    year: number,
+    monthIndex: number,
+    employeeId?: string,
+    lateDeductionPerDay?: number
+  ) => Promise<SalarySlip[]>;
   loadAllPayroll: () => Promise<SalarySlip[]>;
   markPayslipsPaid: (slipIds: string[]) => Promise<SalarySlip[]>;
 }
@@ -1039,8 +1044,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [selectedClinicId]);
 
   const generatePayroll = useCallback(
-    async (year: number, monthIndex: number, employeeId?: string) => {
-      const slips = await generatePayrollForMonth(year, monthIndex, employeeId);
+    async (
+      year: number,
+      monthIndex: number,
+      employeeId?: string,
+      lateDeductionPerDay?: number
+    ) => {
+      const slips = await generatePayrollForMonth(
+        year,
+        monthIndex,
+        employeeId,
+        lateDeductionPerDay
+      );
       await refreshData();
       return slips;
     },

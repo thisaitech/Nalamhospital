@@ -31,12 +31,15 @@ import {
   formatPayslipDate,
 } from '@/utils/annualPayslip';
 import { downloadAnnualPayslipPdf } from '@/utils/downloadAnnualPayslipPdf';
+import { downloadMonthlyPayslipPdf } from '@/utils/downloadMonthlyPayslipPdf';
 import {
   buildClinicFilterOptions,
   filterEmployeesByClinic,
   type ClinicFilterId,
 } from '@/utils/clinicScope';
 import { showAlert } from '@/utils/uiAlert';
+import { getEmployeeLateStatsForMonth } from '@/services/payrollService';
+import type { MonthlyLateStats } from '@/utils/monthlyLateStats';
 
 type PayrollTab = 'monthly' | 'annual';
 type AnnualStep = 'start' | 'form';
@@ -111,6 +114,11 @@ export default function AdminPayrollScreen() {
   const [earnings, setEarnings] = useState<EarningAmounts>(EMPTY_EARNINGS);
   const [reimbursement, setReimbursement] = useState('');
   const [yearDeduction, setYearDeduction] = useState('');
+  const [lateDeductionPerDay, setLateDeductionPerDay] = useState('');
+  const [lateTracking, setLateTracking] = useState<{
+    current: MonthlyLateStats | null;
+    previous: MonthlyLateStats | null;
+  }>({ current: null, previous: null });
 
   const monthOptions = MONTH_NAMES.map((label, index) => ({
     value: String(index),
@@ -202,14 +210,42 @@ export default function AdminPayrollScreen() {
     setSelectedSlipIds([]);
   }, [monthIndex, monthlyEmployeeId, clinicId]);
 
+  useEffect(() => {
+    if (!monthlyEmployeeId) {
+      setLateTracking({ current: null, previous: null });
+      return;
+    }
+
+    let cancelled = false;
+    const prevMonthIndex = monthIndex === 0 ? 11 : monthIndex - 1;
+    const prevYear = monthIndex === 0 ? year - 1 : year;
+
+    void (async () => {
+      try {
+        const [current, previous] = await Promise.all([
+          getEmployeeLateStatsForMonth(monthlyEmployeeId, year, monthIndex),
+          getEmployeeLateStatsForMonth(monthlyEmployeeId, prevYear, prevMonthIndex),
+        ]);
+        if (!cancelled) setLateTracking({ current, previous });
+      } catch {
+        if (!cancelled) setLateTracking({ current: null, previous: null });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [monthlyEmployeeId, monthIndex, year]);
+
   const handleGenerate = async () => {
     if (!monthlyEmployeeId) {
       showAlert('Select employee', 'Choose an employee to generate their monthly payslip.');
       return;
     }
+    const perDay = parseAmount(lateDeductionPerDay);
     setGenerating(true);
     try {
-      await generatePayroll(year, monthIndex, monthlyEmployeeId);
+      await generatePayroll(year, monthIndex, monthlyEmployeeId, perDay);
       await load();
       const emp = scopedEmployees.find((e) => e.employeeId === monthlyEmployeeId);
       const name = emp ? getEmployeeDisplayName(emp) : monthlyEmployeeId;
@@ -309,6 +345,23 @@ export default function AdminPayrollScreen() {
       return false;
     }
     return true;
+  };
+
+  const handleDownloadMonthlyPdf = (slip: SalarySlip, emp: typeof scopedEmployees[number] | undefined) => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      showAlert('Download on web', 'PDF download is available in the web browser.');
+      return;
+    }
+
+    try {
+      downloadMonthlyPayslipPdf({
+        slip,
+        employee: emp ?? null,
+        employeeName: emp ? getEmployeeDisplayName(emp) : slip.employeeId,
+      });
+    } catch (e) {
+      showAlert('Download failed', e instanceof Error ? e.message : 'Could not download PDF.');
+    }
   };
 
   const handleDownloadPdf = () => {
@@ -586,6 +639,57 @@ export default function AdminPayrollScreen() {
             {...fieldColors}
           />
 
+          {monthlyEmployeeId && lateTracking.current ? (
+            <Card style={styles.lateTrackCard}>
+              <Text style={[styles.lateTrackTitle, { color: colors.text }]}>
+                Late tracking (compare only)
+              </Text>
+              <View style={styles.lateTrackRow}>
+                <View style={styles.lateTrackCell}>
+                  <Text style={[styles.lateTrackLabel, { color: colors.textMuted }]}>
+                    {MONTH_NAMES[monthIndex]} {year}
+                  </Text>
+                  <Text style={[styles.lateTrackValue, { color: colors.text }]}>
+                    {lateTracking.current.latePercentage}%
+                  </Text>
+                  <Text style={[styles.lateTrackMeta, { color: colors.textSecondary }]}>
+                    {lateTracking.current.lateDays} late day
+                    {lateTracking.current.lateDays === 1 ? '' : 's'}
+                  </Text>
+                </View>
+                <View style={[styles.lateTrackDivider, { backgroundColor: colors.borderLight }]} />
+                <View style={styles.lateTrackCell}>
+                  <Text style={[styles.lateTrackLabel, { color: colors.textMuted }]}>
+                    {MONTH_NAMES[monthIndex === 0 ? 11 : monthIndex - 1]}{' '}
+                    {monthIndex === 0 ? year - 1 : year}
+                  </Text>
+                  <Text style={[styles.lateTrackValue, { color: colors.text }]}>
+                    {lateTracking.previous?.latePercentage ?? 0}%
+                  </Text>
+                  <Text style={[styles.lateTrackMeta, { color: colors.textSecondary }]}>
+                    {lateTracking.previous?.lateDays ?? 0} late day
+                    {(lateTracking.previous?.lateDays ?? 0) === 1 ? '' : 's'}
+                  </Text>
+                </View>
+              </View>
+            </Card>
+          ) : null}
+
+          <Text style={[styles.editLabel, { color: colors.textMuted }]}>
+            Late deduction per day (₹)
+          </Text>
+          <TextInput
+            value={lateDeductionPerDay}
+            onChangeText={(v) => setLateDeductionPerDay(v.replace(/[^0-9.]/g, ''))}
+            keyboardType="numeric"
+            placeholder="0"
+            placeholderTextColor="#94A3B8"
+            style={[styles.editInput, { color: colors.text, borderColor: colors.borderLight }]}
+          />
+          <Text style={[styles.lateDeductionHint, { color: colors.textMuted }]}>
+            Deduction = late days × this amount (e.g. 10 late days × ₹200 = ₹2,000)
+          </Text>
+
           <Button
             title={
               generating
@@ -725,14 +829,6 @@ export default function AdminPayrollScreen() {
                   <Text style={[styles.label, { color: colors.textMuted }]}>Deductions</Text>
                   <Text style={[styles.value, { color: colors.danger }]}>-{formatCurrency(slip.deductions)}</Text>
                 </View>
-                {(slip.lateFine ?? 0) > 0 ? (
-                  <View style={styles.row}>
-                    <Text style={[styles.label, { color: colors.textMuted }]}>Late fine</Text>
-                    <Text style={[styles.value, { color: colors.danger }]}>
-                      -{formatCurrency(slip.lateFine ?? 0)}
-                    </Text>
-                  </View>
-                ) : null}
                 {(slip.otPay ?? 0) > 0 ? (
                   <View style={styles.row}>
                     <Text style={[styles.label, { color: colors.textMuted }]}>OT pay</Text>
@@ -747,9 +843,20 @@ export default function AdminPayrollScreen() {
                 </View>
                 <Text style={[styles.detail, { color: colors.textMuted }]}>
                   Attended {slip.attendedHours ?? 0}h / {slip.scheduledHours ?? 0}h · Absent {slip.absentDays ?? 0} ·
-                  Unpaid leave {slip.unpaidLeaveDays ?? 0} · OT {slip.otHours ?? 0}h · Late fine ₹
-                  {Math.round(slip.lateFine ?? 0)}
+                  Unpaid leave {slip.unpaidLeaveDays ?? 0} · OT {slip.otHours ?? 0}h
+                  {(slip.lateDays ?? 0) > 0 && (slip.lateDeductionPerDay ?? 0) > 0
+                    ? ` · Late ${slip.lateDays} day${slip.lateDays === 1 ? '' : 's'} × ₹${slip.lateDeductionPerDay}`
+                    : ''}
                 </Text>
+                <View style={styles.actionRow}>
+                  <Pressable
+                    onPress={() => handleDownloadMonthlyPdf(slip, emp)}
+                    style={[styles.outlineBtn, { borderColor: ACCENT }]}
+                  >
+                    <Ionicons name="download-outline" size={18} color={ACCENT} />
+                    <Text style={[styles.outlineBtnText, { color: ACCENT }]}>Download PDF</Text>
+                  </Pressable>
+                </View>
                 </Card>
               </Pressable>
             );
@@ -816,6 +923,15 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  lateTrackCard: { gap: 8, paddingVertical: 14 },
+  lateTrackTitle: { fontSize: 13, fontWeight: '800' },
+  lateTrackRow: { flexDirection: 'row', alignItems: 'stretch' },
+  lateTrackCell: { flex: 1, alignItems: 'center', gap: 2 },
+  lateTrackDivider: { width: 1, marginHorizontal: 8 },
+  lateTrackLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+  lateTrackValue: { fontSize: 22, fontWeight: '800' },
+  lateTrackMeta: { fontSize: 11 },
+  lateDeductionHint: { fontSize: 11, lineHeight: 16, marginTop: -4 },
   slipActionsRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',

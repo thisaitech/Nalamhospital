@@ -690,8 +690,14 @@ export async function createNewHireRecords(
 ): Promise<void> {
   return withCloudOnly(async () => {
     const batch = writeBatch(firestore);
-    batch.set(doc(employeesCollection(), employee.employeeId), employee);
-    batch.set(doc(usersCollection(), userDocId(user.email)), user);
+    batch.set(
+      doc(employeesCollection(), employee.employeeId),
+      stripUndefinedFields(employee as unknown as Record<string, unknown>)
+    );
+    batch.set(
+      doc(usersCollection(), userDocId(user.email)),
+      stripUndefinedFields(user as unknown as Record<string, unknown>)
+    );
     batch.set(doc(leaveBalancesCollection(), employee.employeeId), {
       employeeId: employee.employeeId,
       balances: leaveBalances,
