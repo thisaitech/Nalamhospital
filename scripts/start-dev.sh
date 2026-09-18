@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-PORT="${EXPO_PORT:-8081}"
+PORT="${EXPO_PORT:-8082}"
 
 echo "Stopping any existing Expo server on port ${PORT}..."
 fuser -k "${PORT}/tcp" 2>/dev/null || true

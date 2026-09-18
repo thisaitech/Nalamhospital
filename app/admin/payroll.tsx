@@ -26,6 +26,7 @@ import type { SalarySlip } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
 import {
   amountInWords,
+  buildAnnualEarningsFromEmployee,
   buildFinancialYearOptions,
   currentFinancialYearLabel,
   formatPayslipDate,
@@ -322,11 +323,7 @@ export default function AdminPayrollScreen() {
       return;
     }
     resetAnnualForm();
-    setEarnings({
-      ...EMPTY_EARNINGS,
-      basic: emp.baseSalary ? String(emp.baseSalary) : '',
-      conveyance: emp.busFare ? String(emp.busFare) : '',
-    });
+    setEarnings(buildAnnualEarningsFromEmployee(emp));
     setAnnualStep('form');
   };
 
@@ -353,11 +350,15 @@ export default function AdminPayrollScreen() {
       return;
     }
 
+    const clinic = emp?.clinicId ? allClinics.find((c) => c.id === emp.clinicId) : null;
+
     try {
       downloadMonthlyPayslipPdf({
         slip,
         employee: emp ?? null,
         employeeName: emp ? getEmployeeDisplayName(emp) : slip.employeeId,
+        companyName: clinic?.name || emp?.clinicName,
+        companyAddress: clinic?.address,
       });
     } catch (e) {
       showAlert('Download failed', e instanceof Error ? e.message : 'Could not download PDF.');
@@ -372,6 +373,10 @@ export default function AdminPayrollScreen() {
       return;
     }
 
+    const clinic = selectedEmployee.clinicId
+      ? allClinics.find((c) => c.id === selectedEmployee.clinicId)
+      : null;
+
     try {
       downloadAnnualPayslipPdf({
         financialYear,
@@ -385,6 +390,8 @@ export default function AdminPayrollScreen() {
         reimbursement: earningTotals.reimbursementAmount,
         yearDeduction: earningTotals.yearDeductionAmount,
         net: earningTotals.net,
+        companyName: clinic?.name || selectedEmployee.clinicName,
+        companyAddress: clinic?.address,
       });
     } catch (e) {
       showAlert('Download failed', e instanceof Error ? e.message : 'Could not download PDF.');
@@ -481,6 +488,10 @@ export default function AdminPayrollScreen() {
           onChangeText={setPayslipDate}
           style={[styles.editInput, { color: colors.text, borderColor: colors.borderLight }]}
         />
+        <Text style={[styles.lateDeductionHint, { color: colors.textMuted }]}>
+          Basic and Conveyance are pre-filled as monthly salary × 12. You can edit any head before
+          download.
+        </Text>
 
         <View style={styles.tableHead}>
           <Text style={[styles.th, styles.thSno]}>S. No.</Text>

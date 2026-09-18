@@ -1,5 +1,6 @@
 import { PAYROLL_WORKING_DAYS } from '@/constants/config';
 import { countCompensatoryLeaveDays } from '@/utils/compensatoryLeave';
+import { computePayslipAmounts } from '@/utils/payslipCalculations';
 import type { Employee, LeaveRequest, SalarySlip } from '@/types/employee';
 import type { AttendanceSummary } from '@/types/employee';
 
@@ -78,19 +79,43 @@ export function buildPayslip(params: {
   const rate = dailyRate(employee);
   const busFare = employee.busFare || 0;
   const otPay = Math.round(summary.otHours * hr * otMult * 100) / 100;
-  const unpaidLeaveDeduction = Math.round(unpaidLeaveDays * rate * 100) / 100;
-  // Hours-based pay already reflects days not worked — do not also deduct absent days.
-  const absentDeduction = 0;
   const lateFineAmount = Math.max(0, Math.round(lateFine * 100) / 100);
-
   const compensatoryAllowance = Math.round(compensatoryLeaveDays * rate * 100) / 100;
+  const absentDeduction = 0;
 
-  // Monthly salary → daily → hourly; Basic = hours worked that month × hourly rate.
-  // Example: ₹30,000 / working days / 8h × attended hours.
-  const basic = Math.round(summary.attendedHours * hr * 100) / 100;
-  const allowances = Math.round((busFare + otPay + compensatoryAllowance) * 100) / 100;
-  const deductions = Math.round((unpaidLeaveDeduction + lateFineAmount) * 100) / 100;
-  const netPay = Math.max(0, Math.round((basic + allowances - deductions) * 100) / 100);
+  let basic: number;
+  let allowances: number;
+  let deductions: number;
+  let netPay: number;
+  let unpaidLeaveDeduction: number;
+
+  if (employee.salaryType === 'hourly') {
+    basic = Math.round(summary.attendedHours * hr * 100) / 100;
+    unpaidLeaveDeduction = Math.round(unpaidLeaveDays * rate * 100) / 100;
+    allowances = Math.round((busFare + otPay + compensatoryAllowance) * 100) / 100;
+    deductions = Math.round((unpaidLeaveDeduction + lateFineAmount) * 100) / 100;
+    netPay = Math.max(0, Math.round((basic + allowances - deductions) * 100) / 100);
+  } else {
+    const amounts = computePayslipAmounts({
+      baseSalary: employee.baseSalary,
+      busFare,
+      otPay,
+      compensatoryAllowance,
+      absentDays: summary.absentDays,
+      unpaidLeaveDays,
+      lateFine: lateFineAmount,
+      unpaidLeaveDeduction: 0,
+      year,
+      month,
+    });
+    basic = amounts.basic;
+    unpaidLeaveDeduction = amounts.unpaidLeaveDeduction;
+    allowances = Math.round(
+      (amounts.conveyance + amounts.otPay + amounts.compensatoryAllowance) * 100
+    ) / 100;
+    deductions = amounts.totalDeductions;
+    netPay = amounts.netPay;
+  }
 
   const lastDay = new Date(
     year,

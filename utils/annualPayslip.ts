@@ -71,6 +71,32 @@ export function currentFinancialYearLabel(date = new Date()): string {
   return `${start} - ${start + 1}`;
 }
 
+const ANNUAL_MONTHS = 12;
+
+/** Annual salary heads derived from monthly employee profile (monthly × 12). */
+export function buildAnnualEarningsFromEmployee(employee: {
+  baseSalary?: number;
+  busFare?: number;
+}): {
+  basic: string;
+  dearness: string;
+  onCall: string;
+  conveyance: string;
+  medical: string;
+  special: string;
+} {
+  const monthlyBasic = Math.max(0, Number(employee.baseSalary) || 0);
+  const monthlyConveyance = Math.max(0, Number(employee.busFare) || 0);
+  return {
+    basic: monthlyBasic > 0 ? String(monthlyBasic * ANNUAL_MONTHS) : '',
+    dearness: '',
+    onCall: '',
+    conveyance: monthlyConveyance > 0 ? String(monthlyConveyance * ANNUAL_MONTHS) : '',
+    medical: '',
+    special: '',
+  };
+}
+
 /** Recent financial year options for the annual payslip year picker. */
 export function buildFinancialYearOptions(count = 6, date = new Date()) {
   const year = date.getFullYear();

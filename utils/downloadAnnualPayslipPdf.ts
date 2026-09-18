@@ -1,5 +1,6 @@
+import { APP_NAME } from '@/constants/config';
 import { amountInWords } from '@/utils/annualPayslip';
-import { buildSimplePdf } from '@/utils/buildSimplePdf';
+import { buildPayslipPdf } from '@/utils/buildPayslipPdf';
 
 export interface AnnualPayslipPdfInput {
   financialYear: string;
@@ -13,44 +14,65 @@ export interface AnnualPayslipPdfInput {
   reimbursement: number;
   yearDeduction: number;
   net: number;
+  companyName?: string;
+  companyAddress?: string;
 }
 
-function formatAmount(n: number): string {
-  return n.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
-/** Build and download an annual payslip PDF in the browser. */
+/** Build and download an annual payslip PDF matching the monthly layout. */
 export function downloadAnnualPayslipPdf(input: AnnualPayslipPdfInput): void {
   if (typeof document === 'undefined' || typeof window === 'undefined') {
     throw new Error('PDF download is only available in the browser.');
   }
 
-  const lines = [
-    'ANNUAL PAYSLIP',
-    `For the Financial Year ${input.financialYear}`,
-    '',
-    `Name: ${input.employeeName}`,
-    `Employee ID: ${input.employeeId}`,
-    `Designation: ${input.designation || '-'}`,
-    `Location: ${input.location || '-'}`,
-    `Date: ${input.payslipDate}`,
-    '',
-    'S.No  Salary Head                    Amount (Rs)',
-    '-----------------------------------------------',
-    ...input.rows.map(
-      (row) =>
-        `${String(row.sno).padEnd(5)} ${row.label.padEnd(28)} ${formatAmount(row.amount)}`
-    ),
-    '-----------------------------------------------',
-    `Gross Salary${' '.repeat(22)}${formatAmount(input.gross)}`,
-    `Reimbursement${' '.repeat(20)}${formatAmount(input.reimbursement)}`,
-    `Year Deduction${' '.repeat(18)}-${formatAmount(input.yearDeduction)}`,
-    `Net Salary${' '.repeat(24)}${formatAmount(input.net)}`,
-    '',
-    `Amount in Words: ${amountInWords(input.net)}`,
-  ];
+  const earnings = input.rows.map((row) => ({
+    label: row.label,
+    amount: round2(row.amount),
+  }));
+  if (input.reimbursement > 0) {
+    earnings.push({ label: 'Reimbursement', amount: round2(input.reimbursement) });
+  }
+  const grossEarnings = round2(
+    earnings.reduce((sum, row) => sum + row.amount, 0)
+  );
+  earnings.push({ label: 'Gross Earnings', amount: grossEarnings });
 
-  const blob = buildSimplePdf(lines);
+  const deductions = [
+    { label: 'Income Tax', amount: 0 },
+    { label: 'Provident Fund', amount: 0 },
+  ];
+  if (input.yearDeduction > 0) {
+    deductions.push({ label: 'Year Deduction', amount: round2(input.yearDeduction) });
+  }
+  const totalDeductions = round2(input.yearDeduction);
+  deductions.push({ label: 'Total Deductions', amount: totalDeductions });
+
+  const netPay = round2(Math.max(0, grossEarnings - totalDeductions));
+
+  const blob = buildPayslipPdf({
+    companyName: input.companyName || APP_NAME,
+    companyAddress: input.companyAddress || 'Tirunelveli, Tamil Nadu, India',
+    title: 'Annual Payslip',
+    subtitle: `Financial Year ${input.financialYear}`,
+    summaryRows: [
+      { label: 'Employee Name', value: input.employeeName },
+      { label: 'Employee ID', value: input.employeeId },
+      { label: 'Designation', value: input.designation || '—' },
+      { label: 'Location', value: input.location || '—' },
+      { label: 'Pay Period', value: input.financialYear },
+      { label: 'Pay Date', value: input.payslipDate },
+    ],
+    netPay,
+    earnings,
+    deductions,
+    grossEarnings,
+    totalDeductions,
+    amountInWords: amountInWords(netPay),
+  });
+
   const safeName = input.employeeName.replace(/[^\w\-]+/g, '_');
   const safeFy = input.financialYear.replace(/\s+/g, '');
   const filename = `Annual_Payslip_${safeName}_${safeFy}.pdf`;
