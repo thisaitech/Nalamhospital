@@ -603,7 +603,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const doPunchOut = useCallback(
     async (method: PunchMethod) => {
       if (!employeeId) return null;
-      const record = await punchOut(employeeId, method);
+      const gpsResult = await getPunchGpsReading();
+      const gps = gpsResult.ok ? gpsResult.reading : null;
+      const record = await punchOut(employeeId, method, gps);
       await refreshData();
       return record;
     },

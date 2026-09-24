@@ -309,7 +309,7 @@ async function seedFirestoreIfNeeded(ignoreLocalMode = false): Promise<void> {
     seeded: true,
     seedVersion: FIRESTORE_SEED_VERSION,
     seededAt: new Date().toISOString(),
-    appName: 'Hospital HRM',
+    appName: 'Nalam Healthcare',
   });
 
   await batch.commit();

@@ -23,8 +23,16 @@ function isAllowedSsid(ssid: string): boolean {
 }
 
 export async function requestWifiPermissions(): Promise<boolean> {
-  const { status } = await Location.requestForegroundPermissionsAsync();
-  return status === 'granted';
+  try {
+    const { status: currentStatus } = await Location.getForegroundPermissionsAsync();
+    if (currentStatus === Location.PermissionStatus.GRANTED) {
+      return true;
+    }
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    return status === Location.PermissionStatus.GRANTED;
+  } catch {
+    return false;
+  }
 }
 
 export async function getCurrentWifiInfo(): Promise<{

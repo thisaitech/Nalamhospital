@@ -135,7 +135,7 @@ export async function reverseGeocodePlaceName(
       headers: {
         Accept: 'application/json',
         'Accept-Language': 'en',
-        'User-Agent': 'NalamClinic-HRM/1.0',
+        'User-Agent': 'NalamHealthcare-HRM/1.0',
       },
     });
     if (!response.ok) return null;

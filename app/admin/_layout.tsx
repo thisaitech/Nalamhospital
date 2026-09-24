@@ -100,7 +100,7 @@ export default function AdminLayout() {
         ]}
       >
         <Text style={[styles.topTitle, { color: colors.text }]} numberOfLines={1}>
-          Hospital HR · {adminName}
+          Nalam Healthcare · {adminName}
         </Text>
         <View style={styles.topActions}>
           <Pressable

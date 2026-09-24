@@ -32,7 +32,7 @@ import {
   isInsidePresentWindow,
 } from '@/utils/doctorPresent';
 import { mergeAttendanceByDate } from '@/utils/punchSessions';
-import { resolvePunchLocationStatus } from '@/utils/geofence';
+import { assertWithinClinicGeofence, getActiveClinicGeofence, resolvePunchLocationStatus } from '@/utils/geofence';
 import type { PunchGpsReading } from '@/services/locationService';
 import type { Clinic } from '@/types/clinic';
 import type {
@@ -75,16 +75,17 @@ function buildPunchLocationFields(
   }
 
   const clinic = clinics.find((item) => item.id === clinicId);
+  const fence = getActiveClinicGeofence(clinic);
   const poorAccuracy = gps.accuracyMeters != null && gps.accuracyMeters > POOR_GPS_ACCURACY_M;
   const { status, distanceMeters } = resolvePunchLocationStatus({
     userLat: gps.latitude,
     userLng: gps.longitude,
-    clinicLat: clinic?.latitude,
-    clinicLng: clinic?.longitude,
-    radiusMeters: clinic?.punchRadiusMeters,
+    clinicLat: fence?.lat,
+    clinicLng: fence?.lng,
+    radiusMeters: fence?.radiusMeters,
   });
   const finalStatus = poorAccuracy ? 'unknown' : status;
-  const clinicHasGps = clinic?.latitude != null && clinic?.longitude != null;
+  const clinicHasGps = fence != null;
 
   if (!clinicHasGps) {
     return {
@@ -103,7 +104,7 @@ function buildPunchLocationFields(
     punchInAccuracyMeters: gps.accuracyMeters,
     punchInDistanceMeters: distanceMeters,
     punchInLocationStatus: finalStatus,
-    locationApprovalStatus: finalStatus === 'in_clinic' ? 'approved' : 'pending',
+    locationApprovalStatus: finalStatus === 'in_clinic' ? 'approved' : null,
   };
 }
 
@@ -172,6 +173,8 @@ export async function punchIn(
 
   const [employee, clinics] = await Promise.all([findEmployeeById(employeeId), loadClinics()]);
   const splitShiftEnabled = Boolean(employee?.splitShiftEnabled);
+  const clinic = clinics.find((item) => item.id === employee?.clinicId);
+  assertWithinClinicGeofence({ gps, clinic, action: 'punch in' });
 
   if (splitShiftEnabled && today.splitShiftOnBreak && today.punchIn) {
     const resumeAt = nowTime();
@@ -416,11 +419,17 @@ async function notifyContinueToAdmin(employeeId: string, date: string, continueA
   }
 }
 
-export async function punchOut(employeeId: string, method: PunchMethod): Promise<AttendanceRecord> {
+export async function punchOut(
+  employeeId: string,
+  method: PunchMethod,
+  gps: PunchGpsReading | null = null
+): Promise<AttendanceRecord> {
   const records = await loadAttendance(employeeId);
   const todayKey = new Date().toISOString().split('T')[0];
   const today = records.find((r) => r.date === todayKey) ?? records[0];
-  const employee = await findEmployeeById(employeeId);
+  const [employee, clinics] = await Promise.all([findEmployeeById(employeeId), loadClinics()]);
+  const clinic = clinics.find((item) => item.id === employee?.clinicId);
+  assertWithinClinicGeofence({ gps, clinic, action: 'punch out' });
   const splitShiftEnabled = Boolean(employee?.splitShiftEnabled);
 
   let target: AttendanceRecord | null = today && isOpen(today) ? today : null;

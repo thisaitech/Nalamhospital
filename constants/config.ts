@@ -1,6 +1,6 @@
 import type { AppUser, UserRole } from '@/types/employee';
 
-export const APP_NAME = 'Nalam Clinic';
+export const APP_NAME = 'Nalam Healthcare';
 
 /** Office WiFi SSID — staff must connect to clinic WiFi. */
 export const OFFICE_WIFI_SSID = 'THISAI';

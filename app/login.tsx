@@ -23,11 +23,9 @@ import Colors from '@/constants/Colors';
 import { MOBILE_WEB_MAX_WIDTH } from '@/constants/mobileWeb';
 import type { UserRole } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
+import { APP_NAME } from '@/constants/config';
 
-/** Matches Nalam Clinic banner maroon so status-bar area has no gaps. */
-const BANNER_MAROON = '#8B0018';
-/** Approx aspect ratio of the banner artwork (width / height). */
-const BANNER_ASPECT = 2.55;
+const BANNER_BG = '#FFFFFF';
 
 type AuthMode = 'signin' | 'register';
 
@@ -50,7 +48,7 @@ export default function LoginScreen() {
   const [fieldsReady, setFieldsReady] = useState(Platform.OS !== 'web');
   const { width: screenWidth } = useWindowDimensions();
   const layoutWidth = Platform.OS === 'web' ? Math.min(screenWidth, MOBILE_WEB_MAX_WIDTH) : screenWidth;
-  const bannerBodyHeight = Math.max(120, Math.round(layoutWidth / BANNER_ASPECT));
+  const bannerBodyHeight = Math.min(220, Math.max(160, Math.round(layoutWidth * 0.55)));
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -166,13 +164,13 @@ export default function LoginScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.banner, { backgroundColor: BANNER_MAROON }]}>
-        <View style={{ height: insets.top, backgroundColor: BANNER_MAROON }} />
+      <View style={[styles.banner, { backgroundColor: BANNER_BG }]}>
+        <View style={{ height: insets.top, backgroundColor: BANNER_BG }} />
         <Image
-          source={require('@/assets/images/nalam-clinic-logo.png')}
+          source={require('@/assets/images/nalam-healthcare-logo.jpg')}
           style={[styles.bannerImage, { width: layoutWidth, height: bannerBodyHeight }]}
-          resizeMode="stretch"
-          accessibilityLabel="Nalam Clinic"
+          resizeMode="contain"
+          accessibilityLabel={APP_NAME}
         />
       </View>
 

@@ -455,12 +455,7 @@ export default function DashboardScreen() {
             );
             return;
           }
-          if (record.locationApprovalStatus === 'pending') {
-            showPunchAlert(
-              'Punched In',
-              `Outside clinic — waiting for admin approval. Recorded at ${formatDisplayTime(record.punchIn)}`
-            );
-          } else if (record.punchInLocationStatus === 'in_clinic') {
+          if (record.punchInLocationStatus === 'in_clinic') {
             showPunchAlert(
               'Punched In',
               `In clinic · ${formatDisplayTime(record.punchIn)}${

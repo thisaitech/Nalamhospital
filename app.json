@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Nalam Clinic",
+    "name": "Nalam Healthcare",
     "slug": "nalam-clinic",
     "version": "1.0.3",
     "orientation": "portrait",
@@ -10,8 +10,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Nalam Clinic needs your location to verify you are connected to the office WiFi network for attendance punch-in.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Nalam Clinic needs your location to verify office WiFi for attendance."
+        "NSLocationWhenInUseUsageDescription": "Nalam Healthcare needs your location to verify you are within the clinic geofence for attendance punch-in and punch-out.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Nalam Healthcare needs your location to verify clinic geofence for attendance."
       }
     },
     "android": {
@@ -49,13 +49,13 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow Nalam Clinic to access your location to verify office WiFi for attendance punch-in."
+          "locationWhenInUsePermission": "Allow Nalam Healthcare to access your location to verify you are within the clinic radius for punch-in and punch-out."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Nalam Clinic to access your photos to set your profile picture."
+          "photosPermission": "Allow Nalam Healthcare to access your photos to set your profile picture."
         }
       ],
       [
