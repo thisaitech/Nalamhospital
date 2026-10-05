@@ -2,7 +2,7 @@ import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from '
 import { format, parseISO, subDays } from 'date-fns';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SymbolView } from 'expo-symbols';
+import { AppSymbol } from '@/components/ui/AppSymbol';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -1010,7 +1010,7 @@ export default function DashboardScreen() {
         <Card key={record.id} style={styles.historyCard}>
           <View style={styles.historyRow}>
             <View style={[styles.dateIcon, { backgroundColor: colors.primaryLight }]}>
-              <SymbolView name={{ ios: 'calendar', android: 'event', web: 'event' }} tintColor={colors.primary} size={14} />
+              <AppSymbol name={{ ios: 'calendar', android: 'event', web: 'event' }} tintColor={colors.primary} size={14} />
             </View>
             <View style={styles.historyBody}>
               <Text style={[styles.historyDate, { color: colors.text }]}>

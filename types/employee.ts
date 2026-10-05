@@ -155,6 +155,18 @@ export interface LeaveBalance {
   remaining: number;
 }
 
+export type LeaveAdminAction = 'approved' | 'rejected' | 'cancel_approved' | 'cancel_rejected';
+
+/** Append-only record of an admin decision on a leave request. */
+export interface LeaveActionEntry {
+  action: LeaveAdminAction;
+  /** Admin user ID (users collection document id). */
+  adminId: string;
+  adminName: string;
+  adminEmail: string;
+  at: string;
+}
+
 export interface LeaveRequest {
   id: string;
   employeeId: string;
@@ -167,6 +179,10 @@ export interface LeaveRequest {
   submittedAt: string;
   reviewedAt?: string;
   reviewedBy?: string;
+  /** Admin user ID that approved/rejected the request. */
+  reviewedById?: string;
+  reviewedByEmail?: string;
+  actionHistory?: LeaveActionEntry[];
   /** True when admin inserted leave on behalf of the person. */
   insertedByAdmin?: boolean;
   /** Links compensatory leave to the credit that was redeemed. */

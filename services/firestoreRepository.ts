@@ -27,7 +27,7 @@ import {
   getInitialAttendance,
   getInitialShifts,
 } from '@/data/mockData';
-import { firestore } from '@/services/firebase';
+import { getFirestoreDb } from '@/services/firebase';
 import { getItem, setItem } from '@/services/storage';
 import {
   localDeleteShiftAssignment,
@@ -163,64 +163,66 @@ let cloudSeedPromise: Promise<void> | null = null;
 
 async function ensureCloudFirestoreSeed(): Promise<void> {
   if (!cloudSeedPromise) {
-    cloudSeedPromise = seedFirestoreIfNeeded(true).catch((error) => {
-      cloudSeedPromise = null;
-      throw error;
-    });
+    cloudSeedPromise = seedFirestoreIfNeeded(true)
+      .then(ensureAdminUsersExist)
+      .catch((error) => {
+        cloudSeedPromise = null;
+        throw error;
+      });
   }
   await cloudSeedPromise;
 }
 
 function usersCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.USERS);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.USERS);
 }
 
 function employeesCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.EMPLOYEES);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.EMPLOYEES);
 }
 
 function leaveBalancesCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.LEAVE_BALANCES);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.LEAVE_BALANCES);
 }
 
 function attendanceCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.ATTENDANCE);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.ATTENDANCE);
 }
 
 function leaveRequestsCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.LEAVE_REQUESTS);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.LEAVE_REQUESTS);
 }
 
 function chatMessagesCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.CHAT_MESSAGES);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.CHAT_MESSAGES);
 }
 
 function notificationsCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.NOTIFICATIONS);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.NOTIFICATIONS);
 }
 
 function salarySlipsCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.SALARY_SLIPS);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.SALARY_SLIPS);
 }
 
 function performanceReviewsCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.PERFORMANCE_REVIEWS);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.PERFORMANCE_REVIEWS);
 }
 
 function shiftAssignmentsCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.SHIFT_ASSIGNMENTS);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.SHIFT_ASSIGNMENTS);
 }
 
 function clinicsCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.CLINICS);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.CLINICS);
 }
 
 function clinicSettingsCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.CLINIC_SETTINGS);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.CLINIC_SETTINGS);
 }
 
 function compensatoryCreditsCollection() {
-  return collection(firestore, FIRESTORE_COLLECTIONS.COMPENSATORY_CREDITS);
+  return collection(getFirestoreDb(), FIRESTORE_COLLECTIONS.COMPENSATORY_CREDITS);
 }
 
 function userDocId(email: string) {
@@ -256,14 +258,14 @@ async function seedFirestoreIfNeeded(ignoreLocalMode = false): Promise<void> {
     return;
   }
 
-  const metaRef = doc(firestore, FIRESTORE_COLLECTIONS.META, 'app');
+  const metaRef = doc(getFirestoreDb(), FIRESTORE_COLLECTIONS.META, 'app');
   const metaSnap = await getDoc(metaRef);
   const existingVersion = metaSnap.exists() ? Number(metaSnap.data()?.seedVersion ?? 0) : 0;
   if (metaSnap.exists() && metaSnap.data()?.seeded && existingVersion >= FIRESTORE_SEED_VERSION) {
     return;
   }
 
-  const batch = writeBatch(firestore);
+  const batch = writeBatch(getFirestoreDb());
 
   INITIAL_USERS.forEach((user) => {
     batch.set(doc(usersCollection(), userDocId(user.email)), user);
@@ -315,10 +317,25 @@ async function seedFirestoreIfNeeded(ignoreLocalMode = false): Promise<void> {
   await batch.commit();
 }
 
+/** Adds configured admin logins that are missing, without touching existing users. */
+async function ensureAdminUsersExist(): Promise<void> {
+  const admins = INITIAL_USERS.filter((user) => user.role === 'admin');
+  const snaps = await Promise.all(
+    admins.map((user) => getDoc(doc(usersCollection(), userDocId(user.email))))
+  );
+  const missing = admins.filter((_, index) => !snaps[index].exists());
+  if (!missing.length) return;
+  const batch = writeBatch(getFirestoreDb());
+  missing.forEach((user) => {
+    batch.set(doc(usersCollection(), userDocId(user.email)), user);
+  });
+  await batch.commit();
+}
+
 async function ensureClinicsSeeded(): Promise<void> {
   const snapshot = await getDocs(clinicsCollection());
   if (snapshot.empty) {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     MOCK_CLINICS.forEach((clinic) => {
       batch.set(doc(clinicsCollection(), clinic.id), clinic);
     });
@@ -689,7 +706,7 @@ export async function createNewHireRecords(
   leaveBalances: LeaveBalance[]
 ): Promise<void> {
   return withCloudOnly(async () => {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     batch.set(
       doc(employeesCollection(), employee.employeeId),
       stripUndefinedFields(employee as unknown as Record<string, unknown>)
@@ -716,7 +733,7 @@ export async function loadUsers(): Promise<AppUser[]> {
 
 export async function saveUsers(users: AppUser[]): Promise<void> {
   return withCloudOnly(async () => {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     users.forEach((user) => {
       batch.set(doc(usersCollection(), userDocId(user.email)), user);
     });
@@ -735,7 +752,7 @@ export async function loadEmployees(): Promise<Employee[]> {
 
 export async function saveEmployees(employees: Employee[]): Promise<void> {
   return withCloudOnly(async () => {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     employees.forEach((employee) => {
       batch.set(
         doc(employeesCollection(), employee.employeeId),
@@ -761,7 +778,7 @@ export async function loadLeaveBalancesMap(): Promise<Record<string, LeaveBalanc
 
 export async function saveLeaveBalancesMap(map: Record<string, LeaveBalance[]>): Promise<void> {
   return withCloudOnly(async () => {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     Object.entries(map).forEach(([employeeId, balances]) => {
       batch.set(doc(leaveBalancesCollection(), employeeId), { employeeId, balances });
     });
@@ -803,7 +820,7 @@ export async function loadAttendanceForEmployee(employeeId: string): Promise<Att
 
 export async function saveAttendanceRecords(records: AttendanceRecord[]): Promise<void> {
   return withStore(async () => {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     records.forEach((record) => {
       batch.set(doc(attendanceCollection(), record.id), record);
     });
@@ -825,7 +842,7 @@ export async function loadLeaveRequests(employeeId?: string): Promise<LeaveReque
 
 export async function saveLeaveRequests(requests: LeaveRequest[]): Promise<void> {
   return withStore(async () => {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     requests.forEach((request) => {
       batch.set(doc(leaveRequestsCollection(), request.id), request);
     });
@@ -864,7 +881,7 @@ export async function loadNotifications(employeeId?: string): Promise<AdminNotif
 
 export async function saveNotifications(notifications: AdminNotification[]): Promise<void> {
   return withStore(async () => {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     notifications.forEach((notification) => {
       batch.set(doc(notificationsCollection(), notification.id), notification);
     });
@@ -895,7 +912,7 @@ export async function loadAllSalarySlips(): Promise<SalarySlip[]> {
 
 export async function saveSalarySlips(slips: SalarySlip[]): Promise<void> {
   return withStore(async () => {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     slips.forEach((slip) => {
       batch.set(doc(salarySlipsCollection(), slip.id), slip);
     });
@@ -923,7 +940,7 @@ export async function loadAllShiftAssignments(): Promise<ShiftAssignment[]> {
 
 export async function saveShiftAssignments(assignments: ShiftAssignment[]): Promise<void> {
   return withStore(async () => {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     assignments.forEach((assignment) => {
       batch.set(doc(shiftAssignmentsCollection(), assignment.id), assignment);
     });
@@ -1044,7 +1061,7 @@ export async function loadCompensatoryCredits(employeeId?: string): Promise<Comp
 
 export async function saveCompensatoryCredits(credits: CompensatoryCredit[]): Promise<void> {
   return withStore(async () => {
-    const batch = writeBatch(firestore);
+    const batch = writeBatch(getFirestoreDb());
     credits.forEach((credit) => {
       batch.set(doc(compensatoryCreditsCollection(), credit.id), credit);
     });

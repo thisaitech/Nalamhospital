@@ -1,4 +1,9 @@
-import { findEmployeeById, getEmployeeDisplayName, loadEmployees } from '@/services/employeeRegistry';
+import {
+  findEmployeeById,
+  getEmployeeDisplayName,
+  loadEmployees,
+  loadUsers,
+} from '@/services/employeeRegistry';
 import { format, parseISO, subDays } from 'date-fns';
 import {
   loadAllAttendance,
@@ -13,6 +18,7 @@ import {
 import { getAttendanceRules } from '@/services/attendanceRulesService';
 import { adminInsertLeave } from '@/services/employeeService';
 import { loadShiftsForDate } from '@/services/shiftService';
+import { getItem, storageKeys } from '@/services/storage';
 import { normalizeLeaveType } from '@/utils/clinicLeave';
 import { calcLateMinutes } from '@/utils/attendanceRules';
 import {
@@ -25,6 +31,8 @@ import {
 import type {
   AttendanceRecord,
   Employee,
+  LeaveActionEntry,
+  LeaveAdminAction,
   LeaveRequest,
   ShiftAssignment,
   ShiftType,
@@ -40,6 +48,44 @@ import {
 export interface EnrichedAttendanceApproval extends AttendanceRecord {
   employeeName: string;
   department: string;
+}
+
+export interface LeaveReviewer {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/**
+ * Resolves the admin performing a leave action from the persisted login session,
+ * verified against the users collection — never from a caller-supplied name.
+ */
+export async function requireAuthenticatedAdmin(): Promise<LeaveReviewer> {
+  const session = await getItem<{ role?: string; email?: string }>(storageKeys.SESSION);
+  const email = session?.email?.trim().toLowerCase();
+  if (session?.role !== 'admin' || !email) {
+    throw new Error('Only a logged-in admin can perform this action.');
+  }
+  const users = await loadUsers();
+  const user = users.find((u) => u.role === 'admin' && u.email.trim().toLowerCase() === email);
+  if (!user) {
+    throw new Error('Only a logged-in admin can perform this action.');
+  }
+  return { id: email, name: user.name || user.email, email: user.email };
+}
+
+function leaveActionEntry(
+  action: LeaveAdminAction,
+  reviewer: LeaveReviewer,
+  at: string
+): LeaveActionEntry {
+  return {
+    action,
+    adminId: reviewer.id,
+    adminName: reviewer.name,
+    adminEmail: reviewer.email,
+    at,
+  };
 }
 
 export async function syncLeaveBalancesForEmployee(employeeId: string): Promise<void> {
@@ -163,9 +209,10 @@ export async function getRecentInClinicPunches(days = 7): Promise<AttendanceReco
 
 export async function reviewLeaveRequest(
   requestId: string,
-  status: 'approved' | 'rejected',
-  reviewedBy: string
+  status: 'approved' | 'rejected'
 ): Promise<LeaveRequest> {
+  const reviewer = await requireAuthenticatedAdmin();
+  const reviewedBy = reviewer.name;
   const all = await getAllLeaveRequests();
   const target = all.find((r) => r.id === requestId);
   if (!target) {
@@ -174,11 +221,15 @@ export async function reviewLeaveRequest(
   if (target.status !== 'pending') {
     throw new Error('Request already reviewed');
   }
+  const reviewedAt = new Date().toISOString();
   const updated: LeaveRequest = {
     ...target,
     status,
-    reviewedAt: new Date().toISOString(),
+    reviewedAt,
     reviewedBy,
+    reviewedById: reviewer.id,
+    reviewedByEmail: reviewer.email,
+    actionHistory: [...(target.actionHistory ?? []), leaveActionEntry(status, reviewer, reviewedAt)],
   };
   await saveLeaveRequests([updated]);
   if (status === 'approved') {
@@ -206,9 +257,10 @@ export async function reviewLeaveRequest(
 
 export async function reviewLeaveCancelRequest(
   requestId: string,
-  approved: boolean,
-  reviewedBy: string
+  approved: boolean
 ): Promise<LeaveRequest> {
+  const reviewer = await requireAuthenticatedAdmin();
+  const reviewedBy = reviewer.name;
   const all = await getAllLeaveRequests();
   const target = all.find((r) => r.id === requestId);
   if (!target) {
@@ -220,14 +272,21 @@ export async function reviewLeaveCancelRequest(
 
   const { LEAVE_TYPE_LABELS } = await import('@/constants/config');
   const leaveTypeLabel = LEAVE_TYPE_LABELS[target.type] ?? target.type;
+  const actionHistory = [
+    ...(target.actionHistory ?? []),
+    leaveActionEntry(
+      approved ? 'cancel_approved' : 'cancel_rejected',
+      reviewer,
+      new Date().toISOString()
+    ),
+  ];
 
   if (approved) {
     const updated: LeaveRequest = {
       ...target,
       status: 'cancelled',
       cancelRequestedAt: null,
-      reviewedAt: new Date().toISOString(),
-      reviewedBy,
+      actionHistory,
     };
     await saveLeaveRequests([updated]);
     await syncLeaveBalancesForEmployee(target.employeeId);
@@ -262,8 +321,7 @@ export async function reviewLeaveCancelRequest(
   const updated: LeaveRequest = {
     ...target,
     cancelRequestedAt: null,
-    reviewedAt: new Date().toISOString(),
-    reviewedBy,
+    actionHistory,
   };
   await saveLeaveRequests([updated]);
 
@@ -315,9 +373,9 @@ export async function insertLeaveForEmployee(params: {
   employeeId: string;
   date: string;
   reason: string;
-  reviewedBy: string;
 }): Promise<LeaveRequest> {
-  const request = await adminInsertLeave(params);
+  const reviewer = await requireAuthenticatedAdmin();
+  const request = await adminInsertLeave({ ...params, reviewer });
   await syncLeaveBalancesForEmployee(params.employeeId);
   return request;
 }

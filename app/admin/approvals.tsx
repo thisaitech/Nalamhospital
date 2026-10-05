@@ -4,6 +4,7 @@ import { format, parseISO } from 'date-fns';
 import { useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LeaveAuditInfo } from '@/components/leave/LeaveAuditInfo';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { SelectField } from '@/components/ui/SelectField';
@@ -13,9 +14,14 @@ import Colors from '@/constants/Colors';
 import { LEAVE_TYPE_LABELS } from '@/constants/config';
 import { buildLeaveDateOptions } from '@/constants/leaveOptions';
 import { getEmployeeDisplayName } from '@/services/employeeRegistry';
+import { loadLeaveRequests } from '@/services/firestoreRepository';
+import type { LeaveRequest } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatDisplayTime } from '@/utils/formatTime';
+import { getLeaveDecision } from '@/utils/leaveAudit';
 import { showAlert, showConfirm } from '@/utils/uiAlert';
+
+const RECENTLY_REVIEWED_LIMIT = 15;
 
 type LeaveTab = 'insert' | 'approve' | 'cancel' | 'manual' | 'punch';
 
@@ -80,6 +86,30 @@ export default function AdminLeaveScreen() {
     value: e.employeeId,
     label: getEmployeeDisplayName(e),
   }));
+
+  const [allLeaveRequests, setAllLeaveRequests] = useState<LeaveRequest[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    loadLeaveRequests()
+      .then((requests) => {
+        if (!cancelled) setAllLeaveRequests(requests);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingApprovals, pendingCancelRequests]);
+
+  const recentlyReviewed = useMemo(() => {
+    const names = new Map(clinicEmployees.map((e) => [e.employeeId, getEmployeeDisplayName(e)]));
+    return allLeaveRequests
+      .filter((request) => names.has(request.employeeId))
+      .map((request) => ({ request, decision: getLeaveDecision(request) }))
+      .filter((item) => item.decision !== null)
+      .sort((a, b) => (b.decision?.at ?? '').localeCompare(a.decision?.at ?? ''))
+      .slice(0, RECENTLY_REVIEWED_LIMIT)
+      .map((item) => ({ ...item.request, employeeName: names.get(item.request.employeeId) ?? '' }));
+  }, [allLeaveRequests, clinicEmployees]);
 
   const handleApproveLeave = async (requestId: string, employeeName: string) => {
     if (processingId) return;
@@ -396,6 +426,24 @@ export default function AdminLeaveScreen() {
           })}
         </>
       )}
+      {recentlyReviewed.length > 0 ? (
+        <>
+          <Text style={[styles.section, { color: colors.text }]}>Recently reviewed</Text>
+          {recentlyReviewed.map((item) => (
+            <Card key={`reviewed-${item.id}`} style={styles.card}>
+              <View style={styles.header}>
+                <Text style={[styles.name, { color: colors.text }]}>{item.employeeName}</Text>
+                <StatusSymbolBadge status={item.status} compact />
+              </View>
+              <Text style={[styles.meta, { color: colors.textSecondary }]}>
+                {LEAVE_TYPE_LABELS[item.type] ?? item.type} · {item.days} day(s) ·{' '}
+                {format(parseISO(item.startDate), 'MMM d')} – {format(parseISO(item.endDate), 'MMM d, yyyy')}
+              </Text>
+              <LeaveAuditInfo request={item} color={colors.textSecondary} />
+            </Card>
+          ))}
+        </>
+      ) : null}
         </>
       ) : null}
 

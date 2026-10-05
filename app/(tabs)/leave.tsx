@@ -3,6 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { Link, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 
+import { LeaveAuditInfo } from '@/components/leave/LeaveAuditInfo';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
@@ -231,6 +232,7 @@ export default function LeaveScreen() {
               <Text style={[styles.requestMeta, { color: colors.textSecondary }]}>
                 Submitted {format(parseISO(request.submittedAt), 'MMM d, yyyy')}
               </Text>
+              <LeaveAuditInfo request={request} color={colors.textSecondary} />
               {cancelPending ? (
                 <Text style={[styles.cancelPendingLabel, { color: colors.textMuted }]}>
                   Cancellation pending admin approval

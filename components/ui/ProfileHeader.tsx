@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Link } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppSymbol } from '@/components/ui/AppSymbol';
 
 import { EmployeeAvatar } from '@/components/ui/EmployeeAvatar';
 import Colors from '@/constants/Colors';
@@ -93,7 +93,11 @@ export function ProfileHeader({ firstName, lastName, position, employeeId, avata
           avatar={avatar}
         />
         <View style={[styles.chevron, { backgroundColor: colors.background }]}>
-          <SymbolView name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }} tintColor={colors.textMuted} size={14} />
+          <AppSymbol
+            name={{ ios: 'chevron.right', android: 'chevron-right', web: 'chevron_right' }}
+            tintColor={colors.textMuted}
+            size={14}
+          />
         </View>
       </Pressable>
     </Link>

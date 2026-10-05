@@ -1,9 +1,8 @@
 import { useFonts } from 'expo-font';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
-import 'react-native-reanimated';
+import { Component, useEffect, type ReactNode } from 'react';
+import { ActivityIndicator, Platform, Text, View } from 'react-native';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import { MobileWebFrame } from '@/components/MobileWebFrame';
@@ -11,15 +10,35 @@ import { FloatingNotificationHost } from '@/components/notifications/FloatingNot
 import { AppProvider, useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/Colors';
 import { initFirebaseAnalytics } from '@/services/firebase';
-import '@/services/firebase';
 
 export { ErrorBoundary } from 'expo-router';
 
 export const unstable_settings = {
-  initialRouteName: '(tabs)',
+  initialRouteName: 'login',
 };
 
-SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+class StartupErrorBoundary extends Component<{ children: ReactNode }, { message: string | null }> {
+  state = { message: null as string | null };
+
+  static getDerivedStateFromError(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { message };
+  }
+
+  render() {
+    if (this.state.message) {
+      return (
+        <View style={{ flex: 1, padding: 24, justifyContent: 'center', backgroundColor: '#FFFFFF' }}>
+          <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 12 }}>Nalam Healthcare</Text>
+          <Text style={{ fontSize: 15, lineHeight: 22 }}>{this.state.message}</Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, isAdmin } = useApp();
@@ -71,25 +90,49 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout() {
-  const [loaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-    ionicons: require('../assets/fonts/Ionicons.ttf'),
-  });
+  const fontMap =
+    Platform.OS === 'web'
+      ? {
+          SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+          ionicons: require('../assets/fonts/Ionicons.ttf'),
+        }
+      : {
+          SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+        };
+  const [loaded, error] = useFonts(fontMap);
 
   useEffect(() => {
-    if (error) throw error;
+    if (error) {
+      console.warn('[fonts] Failed to load custom fonts, using system fonts.', error);
+      SplashScreen.hideAsync().catch(() => {});
+    }
   }, [error]);
 
   useEffect(() => {
-    if (loaded) SplashScreen.hideAsync();
+    if (loaded) {
+      SplashScreen.hideAsync().catch(() => {});
+      return;
+    }
+    const timer = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
+    }, 4000);
+    return () => clearTimeout(timer);
   }, [loaded]);
 
-  if (!loaded) return null;
+  if (!loaded && !error) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' }}>
+        <ActivityIndicator size="large" color="#4F46E5" />
+      </View>
+    );
+  }
 
   return (
-    <AppProvider>
-      <RootLayoutNav />
-    </AppProvider>
+    <StartupErrorBoundary>
+      <AppProvider>
+        <RootLayoutNav />
+      </AppProvider>
+    </StartupErrorBoundary>
   );
 }
 
@@ -130,7 +173,7 @@ function RootLayoutNav() {
               <Stack.Screen name="notifications" options={{ title: 'Requests' }} />
               <Stack.Screen name="punch" options={{ presentation: 'modal', headerShown: false }} />
             </Stack>
-            <FloatingNotificationHost />
+            {Platform.OS !== 'web' ? <FloatingNotificationHost /> : null}
           </View>
         </AuthGate>
       </MobileWebFrame>

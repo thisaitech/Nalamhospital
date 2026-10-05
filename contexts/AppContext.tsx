@@ -461,7 +461,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        await ensureFirestoreSeed();
+        try {
+          await ensureFirestoreSeed();
+        } catch (seedError) {
+          console.warn('[bootstrap] Firestore seed skipped', seedError);
+        }
         const saved = await getItem<Session>(storageKeys.SESSION);
         if (saved) {
           if (saved.role === 'employee' && saved.email) {
@@ -811,7 +815,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const approveLeave = useCallback(
     async (requestId: string) => {
-      await reviewLeaveRequest(requestId, 'approved', session?.name ?? 'Admin');
+      await reviewLeaveRequest(requestId, 'approved');
       setPendingApprovals((prev) => prev.filter((item) => item.id !== requestId));
       setAdminStats((prev) => ({
         ...prev,
@@ -819,12 +823,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }));
       await refreshData();
     },
-    [session?.name, refreshData]
+    [refreshData]
   );
 
   const rejectLeave = useCallback(
     async (requestId: string) => {
-      await reviewLeaveRequest(requestId, 'rejected', session?.name ?? 'Admin');
+      await reviewLeaveRequest(requestId, 'rejected');
       setPendingApprovals((prev) => prev.filter((item) => item.id !== requestId));
       setAdminStats((prev) => ({
         ...prev,
@@ -832,12 +836,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }));
       await refreshData();
     },
-    [session?.name, refreshData]
+    [refreshData]
   );
 
   const approveLeaveCancel = useCallback(
     async (requestId: string) => {
-      await reviewLeaveCancelRequest(requestId, true, session?.name ?? 'Admin');
+      await reviewLeaveCancelRequest(requestId, true);
       setPendingLeaveCancelRequests((prev) => prev.filter((item) => item.id !== requestId));
       setAdminStats((prev) => ({
         ...prev,
@@ -845,12 +849,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }));
       await refreshData();
     },
-    [session?.name, refreshData]
+    [refreshData]
   );
 
   const rejectLeaveCancel = useCallback(
     async (requestId: string) => {
-      await reviewLeaveCancelRequest(requestId, false, session?.name ?? 'Admin');
+      await reviewLeaveCancelRequest(requestId, false);
       setPendingLeaveCancelRequests((prev) => prev.filter((item) => item.id !== requestId));
       setAdminStats((prev) => ({
         ...prev,
@@ -858,7 +862,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }));
       await refreshData();
     },
-    [session?.name, refreshData]
+    [refreshData]
   );
 
   const approveShiftChangeCancel = useCallback(
@@ -954,11 +958,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         employeeId: empId,
         date,
         reason,
-        reviewedBy: session?.name ?? 'Admin',
       });
       await refreshData();
     },
-    [session?.name, refreshData]
+    [refreshData]
   );
 
   const markPresent = useCallback(

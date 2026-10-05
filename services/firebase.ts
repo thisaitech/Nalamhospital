@@ -1,20 +1,38 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, type Firestore } from 'firebase/firestore';
 import { Platform } from 'react-native';
 
 import { firebaseConfig } from '@/constants/firebase';
 
-function createFirebaseApp(): FirebaseApp {
-  if (getApps().length > 0) {
-    return getApp();
+let firebaseApp: FirebaseApp | null = null;
+let firestoreInstance: Firestore | null = null;
+
+function getFirebaseApp(): FirebaseApp {
+  if (!firebaseApp) {
+    firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
   }
-  return initializeApp(firebaseConfig);
+  return firebaseApp;
 }
 
-export const firebaseApp = createFirebaseApp();
-export const firebaseAuth = getAuth(firebaseApp);
-export const firestore = getFirestore(firebaseApp);
+/** Lazy Firestore — avoids native init during module load before the JS runtime is ready. */
+export function getFirestoreDb(): Firestore {
+  if (firestoreInstance) {
+    return firestoreInstance;
+  }
+  const app = getFirebaseApp();
+  if (Platform.OS === 'web') {
+    firestoreInstance = getFirestore(app);
+    return firestoreInstance;
+  }
+  try {
+    firestoreInstance = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+    });
+  } catch {
+    firestoreInstance = getFirestore(app);
+  }
+  return firestoreInstance;
+}
 
 /** Analytics only runs on web (not Android/iOS in Expo). */
 export async function initFirebaseAnalytics() {
@@ -28,5 +46,5 @@ export async function initFirebaseAnalytics() {
     return null;
   }
 
-  return getAnalytics(firebaseApp);
+  return getAnalytics(getFirebaseApp());
 }

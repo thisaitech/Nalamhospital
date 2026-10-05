@@ -1,32 +1,57 @@
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import type * as NotificationsType from 'expo-notifications';
 
 import type { AdminNotification } from '@/types/notification';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+type NotificationsModule = typeof NotificationsType;
 
+let Notifications: NotificationsModule | null = null;
+let handlerReady = false;
 let permissionsReady: Promise<boolean> | null = null;
 let channelReady = false;
+
+async function getNotifications(): Promise<NotificationsModule | null> {
+  if (Platform.OS === 'web') return null;
+  if (!Notifications) {
+    try {
+      Notifications = await import('expo-notifications');
+    } catch (error) {
+      console.warn('[notifications] Module unavailable', error);
+      return null;
+    }
+  }
+  if (!handlerReady && Notifications) {
+    try {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        }),
+      });
+      handlerReady = true;
+    } catch (error) {
+      console.warn('[notifications] Could not register notification handler', error);
+    }
+  }
+  return Notifications;
+}
 
 export async function ensureNotificationPermissions(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
   if (!permissionsReady) {
     permissionsReady = (async () => {
       try {
-        const current = await Notifications.getPermissionsAsync();
-        if (current.granted || current.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+        const mod = await getNotifications();
+        if (!mod) return false;
+        const current = await mod.getPermissionsAsync();
+        if (current.granted || current.ios?.status === mod.IosAuthorizationStatus.PROVISIONAL) {
           return true;
         }
-        const requested = await Notifications.requestPermissionsAsync();
+        const requested = await mod.requestPermissionsAsync();
         return Boolean(
-          requested.granted || requested.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+          requested.granted || requested.ios?.status === mod.IosAuthorizationStatus.PROVISIONAL
         );
       } catch {
         return false;
@@ -38,12 +63,14 @@ export async function ensureNotificationPermissions(): Promise<boolean> {
 
 async function ensureAndroidChannel(): Promise<void> {
   if (Platform.OS !== 'android' || channelReady) return;
-  await Notifications.setNotificationChannelAsync('nalam-alerts', {
+  const mod = await getNotifications();
+  if (!mod) return;
+  await mod.setNotificationChannelAsync('nalam-alerts', {
     name: 'Clinic alerts',
-    importance: Notifications.AndroidImportance.HIGH,
+    importance: mod.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#0D9488',
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    lockscreenVisibility: mod.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
   });
   channelReady = true;
@@ -58,9 +85,11 @@ export async function presentLocalNotification(
   if (!ok) return;
 
   try {
+    const mod = await getNotifications();
+    if (!mod) return;
     await ensureAndroidChannel();
 
-    await Notifications.scheduleNotificationAsync({
+    await mod.scheduleNotificationAsync({
       content: {
         title: notification.title,
         body: notification.body,
@@ -82,10 +111,24 @@ export async function presentLocalNotification(
 export function subscribeNotificationResponse(
   onOpen: (notificationId?: string) => void
 ): { remove: () => void } {
-  return Notifications.addNotificationResponseReceivedListener((response) => {
-    const data = response.notification.request.content.data as
-      | { notificationId?: string }
-      | undefined;
-    onOpen(typeof data?.notificationId === 'string' ? data.notificationId : undefined);
-  });
+  let subscription: { remove: () => void } | null = null;
+  let cancelled = false;
+
+  void (async () => {
+    const mod = await getNotifications();
+    if (!mod || cancelled) return;
+    subscription = mod.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as
+        | { notificationId?: string }
+        | undefined;
+      onOpen(typeof data?.notificationId === 'string' ? data.notificationId : undefined);
+    });
+  })();
+
+  return {
+    remove: () => {
+      cancelled = true;
+      subscription?.remove();
+    },
+  };
 }

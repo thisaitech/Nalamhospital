@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { AppSymbol } from '@/components/ui/AppSymbol';
 
 import Colors from '@/constants/Colors';
 import { PAID_SYMBOL, PENDING_WRONG_SYMBOL } from '@/constants/statusSymbols';
@@ -42,11 +42,7 @@ export function StatCard({
     </View>
   ) : icon ? (
     <View style={[styles.iconWrap, { backgroundColor: colors.primaryLight }]}>
-      <SymbolView
-        name={icon as React.ComponentProps<typeof SymbolView>['name']}
-        tintColor={accent ?? colors.primary}
-        size={15}
-      />
+      <AppSymbol name={icon} tintColor={accent ?? colors.primary} size={15} />
     </View>
   ) : null;
 

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Nalam Healthcare",
     "slug": "nalam-clinic",
-    "version": "1.0.3",
+    "version": "1.0.8",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "nalamclinic",
@@ -15,6 +15,7 @@
       }
     },
     "android": {
+      "versionCode": 6,
       "package": "com.thisaitech.hris",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
@@ -37,6 +38,14 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "useLegacyPackaging": true
+          }
+        }
+      ],
       "expo-router",
       [
         "expo-splash-screen",

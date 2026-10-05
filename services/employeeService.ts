@@ -729,7 +729,7 @@ export async function adminInsertLeave(params: {
   employeeId: string;
   date: string;
   reason: string;
-  reviewedBy: string;
+  reviewer: { id: string; name: string; email: string };
 }): Promise<LeaveRequest> {
   const employee = await findEmployeeById(params.employeeId);
   if (!employee) throw new Error('Person not found');
@@ -743,6 +743,8 @@ export async function adminInsertLeave(params: {
     );
   }
   const resolved = resolveLeaveType(balances, existingRequests, 1);
+  const now = new Date().toISOString();
+  const { reviewer } = params;
 
   const request: LeaveRequest = {
     id: `lr-admin-${Date.now()}`,
@@ -753,9 +755,20 @@ export async function adminInsertLeave(params: {
     days: 1,
     reason: params.reason.trim() || 'Inserted by admin',
     status: 'approved',
-    submittedAt: new Date().toISOString(),
-    reviewedAt: new Date().toISOString(),
-    reviewedBy: params.reviewedBy,
+    submittedAt: now,
+    reviewedAt: now,
+    reviewedBy: reviewer.name,
+    reviewedById: reviewer.id,
+    reviewedByEmail: reviewer.email,
+    actionHistory: [
+      {
+        action: 'approved',
+        adminId: reviewer.id,
+        adminName: reviewer.name,
+        adminEmail: reviewer.email,
+        at: now,
+      },
+    ],
     insertedByAdmin: true,
   };
   await saveLeaveRequests([request]);

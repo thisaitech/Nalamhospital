@@ -12,6 +12,7 @@ import {
   endOfWeek,
 } from 'date-fns';
 
+import { LeaveAuditInfo } from '@/components/leave/LeaveAuditInfo';
 import { Card } from '@/components/ui/Card';
 import { SelectField } from '@/components/ui/SelectField';
 import { StatCard } from '@/components/ui/StatCard';
@@ -520,13 +521,16 @@ export function AttendanceCalendarPanel({
                 {row.clinicName ? ` · ${row.clinicName}` : ''}
               </Text>
               {row.kind === 'leave' ? (
-                <Text style={[styles.detailMeta, { color: colors.textSecondary }]}>
-                  {LEAVE_TYPE_LABELS[normalizeLeaveType(row.leave.type)] ?? row.leave.type} ·{' '}
-                  {row.leave.status}
-                  {getLeaveReasonLabel(row.leave.reason)
-                    ? ` · ${getLeaveReasonLabel(row.leave.reason)}`
-                    : ''}
-                </Text>
+                <>
+                  <Text style={[styles.detailMeta, { color: colors.textSecondary }]}>
+                    {LEAVE_TYPE_LABELS[normalizeLeaveType(row.leave.type)] ?? row.leave.type} ·{' '}
+                    {row.leave.status}
+                    {getLeaveReasonLabel(row.leave.reason)
+                      ? ` · ${getLeaveReasonLabel(row.leave.reason)}`
+                      : ''}
+                  </Text>
+                  <LeaveAuditInfo request={row.leave} color={colors.textSecondary} />
+                </>
               ) : (
                 <>
                   <Text style={[styles.detailMeta, { color: colors.textSecondary }]}>
@@ -578,6 +582,7 @@ export function AttendanceCalendarPanel({
               <Text style={[styles.listMeta, { color: colors.textSecondary }]}>
                 {LEAVE_TYPE_LABELS[normalizeLeaveType(item.type)] ?? item.type} · {item.days} day(s)
               </Text>
+              <LeaveAuditInfo request={item} color={colors.textSecondary} />
             </Card>
           );
         })
@@ -603,6 +608,7 @@ export function AttendanceCalendarPanel({
               <Text style={[styles.listMeta, { color: colors.textSecondary }]}>
                 {item.status} · {LEAVE_TYPE_LABELS[normalizeLeaveType(item.type)] ?? item.type}
               </Text>
+              <LeaveAuditInfo request={item} color={colors.textSecondary} />
             </Card>
           );
         })

@@ -81,6 +81,18 @@ export const INITIAL_USERS: AppUser[] = [
     role: 'admin',
     name: 'Admin Two',
   },
+  {
+    email: 'prasath14smile@gmail.com',
+    password: 'admin123',
+    role: 'admin',
+    name: 'Prasath',
+  },
+  {
+    email: 'ajayraja.sms@gmail.com',
+    password: 'admin123',
+    role: 'admin',
+    name: 'Ajay Raja',
+  },
 ];
 
 export const LEAVE_TYPE_LABELS: Record<string, string> = {
