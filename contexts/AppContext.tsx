@@ -116,7 +116,7 @@ import {
   clinicStatsForEmployees,
   filterByEmployeeIds,
   filterEmployeesByClinic,
-  isHiddenClinicDropdownOption,
+  isRetiredClinic,
   type ClinicFilterId,
 } from '@/utils/clinicScope';
 import type { AttendanceSummary } from '@/types/employee';
@@ -496,7 +496,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (selectedClinicId === 'all') return;
     const selected = allClinics.find((clinic) => clinic.id === selectedClinicId);
-    if (allClinics.length > 0 && (!selected || isHiddenClinicDropdownOption(selected))) {
+    if (allClinics.length > 0 && (!selected || isRetiredClinic(selected))) {
       setSelectedClinicId('all');
     }
   }, [allClinics, selectedClinicId, setSelectedClinicId]);

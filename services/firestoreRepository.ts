@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 
 import { DEFAULT_NORMAL_SHIFT_TIMINGS, DEFAULT_SHIFT_CHANGE_TIMINGS, INITIAL_USERS } from '@/constants/config';
+import { RETIRED_CLINIC_IDS } from '@/utils/clinicScope';
 import {
   FIRESTORE_COLLECTIONS,
   FIRESTORE_SEED_VERSION,
@@ -437,7 +438,7 @@ export async function loadClinics(): Promise<Clinic[]> {
     const snapshot = await getDocs(clinicsCollection());
     return snapshot.docs
       .map((item) => withClinicDefaults(item.data() as Clinic))
-      .filter((c) => c.active)
+      .filter((c) => c.active && !RETIRED_CLINIC_IDS.has(c.id))
       .sort((a, b) => a.name.localeCompare(b.name));
   });
 }

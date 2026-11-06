@@ -10,6 +10,7 @@ import {
   getInitialShifts,
 } from '@/data/mockData';
 import { MOCK_CLINICS } from '@/data/mockClinics';
+import { RETIRED_CLINIC_IDS } from '@/utils/clinicScope';
 import { getItem, setItem } from '@/services/storage';
 import { sanitizeEmployeeAvatar } from '@/components/ui/EmployeeAvatar';
 import type { ChatMessage } from '@/types/chat';
@@ -332,7 +333,9 @@ export async function localSaveNotifications(notifications: AdminNotification[])
 export async function localLoadClinics(): Promise<Clinic[]> {
   await ensureLocalSeed();
   const clinics = (await getItem<Clinic[]>(LOCAL_KEYS.CLINICS)) ?? [];
-  return clinics.filter((c) => c.active).sort((a, b) => a.name.localeCompare(b.name));
+  return clinics
+    .filter((c) => c.active && !RETIRED_CLINIC_IDS.has(c.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function localSaveClinics(clinics: Clinic[]): Promise<void> {

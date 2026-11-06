@@ -18,16 +18,22 @@ export function filterByEmployeeIds<T>(
   return items.filter((item) => employeeIds.has(getEmployeeId(item)));
 }
 
-/** Dropdown-only hide list. Clinic documents and historical records stay unchanged. */
-const HIDDEN_CLINIC_DROPDOWN_NAMES = new Set(['jeyam clinic']);
+/**
+ * Existing Jeyam Clinic (clinics/CLN002). Hidden for every account.
+ * The Firestore document stays in place so historical records are preserved.
+ */
+export const RETIRED_CLINIC_IDS = new Set(['CLN002']);
 
-export function isHiddenClinicDropdownOption(clinic: { name?: string }): boolean {
+const RETIRED_CLINIC_NAMES = new Set(['jeyam clinic']);
+
+export function isRetiredClinic(clinic: { id?: string; name?: string }): boolean {
+  if (clinic.id && RETIRED_CLINIC_IDS.has(clinic.id)) return true;
   const name = clinic.name?.trim().toLowerCase() ?? '';
-  return HIDDEN_CLINIC_DROPDOWN_NAMES.has(name);
+  return RETIRED_CLINIC_NAMES.has(name);
 }
 
 export function clinicsForDropdown(clinics: Clinic[]): Clinic[] {
-  return clinics.filter((clinic) => !isHiddenClinicDropdownOption(clinic));
+  return clinics.filter((clinic) => !isRetiredClinic(clinic));
 }
 
 export function buildClinicFilterOptions(clinics: Clinic[]) {
