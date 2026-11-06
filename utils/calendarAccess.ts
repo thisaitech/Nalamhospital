@@ -1,6 +1,7 @@
 import type { Clinic } from '@/types/clinic';
 import type { Employee, StaffCategory } from '@/types/employee';
 import { getEmployeeDisplayName } from '@/services/employeeRegistry';
+import { clinicsForDropdown } from '@/utils/clinicScope';
 
 export type CalendarViewType = 'doctor' | 'staff';
 
@@ -71,7 +72,7 @@ export function toPersonSelectOptions(
 export function clinicSelectOptions(clinics: Clinic[]) {
   return [
     { value: 'all', label: 'All clinics' },
-    ...clinics.map((c) => ({ value: c.id, label: c.name })),
+    ...clinicsForDropdown(clinics).map((c) => ({ value: c.id, label: c.name })),
   ];
 }
 

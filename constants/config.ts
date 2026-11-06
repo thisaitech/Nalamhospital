@@ -70,26 +70,14 @@ export const INITIAL_USERS: AppUser[] = [
     name: 'Priya Patel',
   },
   {
-    email: 'admin1@clinic.com',
-    password: 'admin123',
-    role: 'admin',
-    name: 'Admin One',
-  },
-  {
-    email: 'admin2@clinic.com',
-    password: 'admin123',
-    role: 'admin',
-    name: 'Admin Two',
-  },
-  {
     email: 'prasath14smile@gmail.com',
-    password: 'admin123',
+    password: 'Nalam@2020',
     role: 'admin',
     name: 'Prasath',
   },
   {
     email: 'ajayraja.sms@gmail.com',
-    password: 'admin123',
+    password: 'Nalam@2020',
     role: 'admin',
     name: 'Ajay Raja',
   },
@@ -109,7 +97,7 @@ export const COMPENSATORY_MIN_SEGMENT_HOURS = 1;
 
 export const DEMO_LOGINS: Record<UserRole, { email: string; password: string }> = {
   employee: { email: 'dr.smith@clinic.com', password: 'password123' },
-  admin: { email: 'admin1@clinic.com', password: 'admin123' },
+  admin: { email: 'prasath14smile@gmail.com', password: 'Nalam@2020' },
 };
 
 export const MONTH_NAMES = [

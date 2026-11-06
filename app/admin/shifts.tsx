@@ -33,7 +33,7 @@ import {
 } from '@/services/shiftService';
 import type { Employee, ShiftChangeTimings, ShiftType } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
-import { filterEmployeesByClinic } from '@/utils/clinicScope';
+import { clinicsForDropdown, filterEmployeesByClinic } from '@/utils/clinicScope';
 import { getPunchGpsReading, reverseGeocodePlaceName } from '@/services/locationService';
 import type { Clinic, ClinicLocationHistoryEntry } from '@/types/clinic';
 import { calcHoursBetween } from '@/utils/shiftHours';
@@ -610,12 +610,12 @@ export default function AdminShiftsScreen() {
   const dateOptions = useMemo(() => buildDateOptions(7, 21), []);
   const timeOptions = useMemo(() => buildTimeOptions(), []);
   const clinicOptions = useMemo(
-    () => allClinics.map((clinic) => ({ value: clinic.id, label: clinic.name })),
+    () => clinicsForDropdown(allClinics).map((clinic) => ({ value: clinic.id, label: clinic.name })),
     [allClinics]
   );
 
   const [clinicId, setClinicId] = useState(
-    selectedClinicId !== 'all' ? selectedClinicId : allClinics[0]?.id ?? ''
+    selectedClinicId !== 'all' ? selectedClinicId : clinicsForDropdown(allClinics)[0]?.id ?? ''
   );
   const [staffSearch, setStaffSearch] = useState('');
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
@@ -701,9 +701,15 @@ export default function AdminShiftsScreen() {
   }, []);
 
   useEffect(() => {
-    if (!clinicId && allClinics[0]?.id) {
-      setClinicId(selectedClinicId !== 'all' ? selectedClinicId : allClinics[0].id);
-    }
+    const visibleClinics = clinicsForDropdown(allClinics);
+    const visible =
+      clinicId && visibleClinics.some((clinic) => clinic.id === clinicId) ? clinicId : '';
+    if (visible) return;
+    const next =
+      selectedClinicId !== 'all' && visibleClinics.some((clinic) => clinic.id === selectedClinicId)
+        ? selectedClinicId
+        : visibleClinics[0]?.id ?? '';
+    if (next) setClinicId(next);
   }, [allClinics, clinicId, selectedClinicId]);
 
   useEffect(() => {

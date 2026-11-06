@@ -32,6 +32,7 @@ import {
 import { getNormalShiftTimings } from '@/services/shiftService';
 import type { Employee, StaffCategory } from '@/types/employee';
 import { useColorScheme } from '@/components/useColorScheme';
+import { clinicsForDropdown } from '@/utils/clinicScope';
 import { parseLeaveDate } from '@/utils/leaveValidation';
 
 function showAlert(title: string, message: string, onOk?: () => void) {
@@ -71,7 +72,7 @@ export default function NewHireScreen() {
   const [loadingEmployee, setLoadingEmployee] = useState(false);
 
   const clinicOptions = useMemo(
-    () => allClinics.map((clinic) => ({ label: clinic.name, value: clinic.id })),
+    () => clinicsForDropdown(allClinics).map((clinic) => ({ label: clinic.name, value: clinic.id })),
     [allClinics]
   );
 
@@ -187,12 +188,13 @@ export default function NewHireScreen() {
       setClinicId('');
       return;
     }
+    const visibleClinics = clinicsForDropdown(allClinics);
     const preferred =
-      selectedClinicId !== 'all' && allClinics.some((clinic) => clinic.id === selectedClinicId)
+      selectedClinicId !== 'all' && visibleClinics.some((clinic) => clinic.id === selectedClinicId)
         ? selectedClinicId
-        : allClinics[0].id;
+        : visibleClinics[0]?.id ?? '';
     setClinicId((current) =>
-      current && allClinics.some((clinic) => clinic.id === current) ? current : preferred
+      current && visibleClinics.some((clinic) => clinic.id === current) ? current : preferred
     );
   }, [allClinics, selectedClinicId]);
 

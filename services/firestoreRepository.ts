@@ -317,18 +317,24 @@ async function seedFirestoreIfNeeded(ignoreLocalMode = false): Promise<void> {
   await batch.commit();
 }
 
-/** Adds configured admin logins that are missing, without touching existing users. */
+/** Keeps only the configured admin logins, and writes their exact email, name, and password. */
 async function ensureAdminUsersExist(): Promise<void> {
   const admins = INITIAL_USERS.filter((user) => user.role === 'admin');
-  const snaps = await Promise.all(
-    admins.map((user) => getDoc(doc(usersCollection(), userDocId(user.email))))
-  );
-  const missing = admins.filter((_, index) => !snaps[index].exists());
-  if (!missing.length) return;
+  const allowed = new Set(admins.map((user) => userDocId(user.email)));
+  const snapshot = await getDocs(usersCollection());
   const batch = writeBatch(getFirestoreDb());
-  missing.forEach((user) => {
+
+  admins.forEach((user) => {
     batch.set(doc(usersCollection(), userDocId(user.email)), user);
   });
+
+  snapshot.docs.forEach((item) => {
+    const data = item.data() as { role?: string };
+    if (data.role === 'admin' && !allowed.has(item.id)) {
+      batch.delete(item.ref);
+    }
+  });
+
   await batch.commit();
 }
 
