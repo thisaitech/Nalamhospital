@@ -1,0 +1,116 @@
+---
+description: Permanent GitHub + Firebase deployment workflow for Nalam Healthcare. Use whenever the user asks to commit, push, or deploy.
+alwaysApply: true
+---
+
+# Nalam Healthcare Deployment Rule
+
+Project: `D:\project\Nalamhospital`  
+Branch: `main`  
+Firebase project: read from `.firebaserc` (expected `nalamclinic`)  
+Default Hosting target: Preview channel `testing` (7-day expiry)  
+Never deploy Hosting production unless the user explicitly says `DEPLOY TO PRODUCTION`.
+
+## When this rule applies
+
+Use this workflow for requests such as:
+- Commit / Commit and Push
+- Deploy / Deploy to Firebase
+- Push to GitHub
+- DEPLOY TO PRODUCTION
+
+This rule controls deployment only. Do not redesign UI, rewrite modules, or change unrelated working functionality.
+
+## STEP 1 – Project verification
+
+1. Confirm cwd is the Nalam Healthcare repo (`D:\project\Nalamhospital` or its git root).
+2. Confirm `.git` exists and current branch is `main`.
+3. Confirm `origin` remote points at the intended GitHub repo.
+4. Read Firebase project ID from `.firebaserc`.
+5. Confirm active Firebase project matches that ID.
+6. Never switch Firebase projects automatically.
+7. Never run `firebase init`.
+
+## STEP 2 – Change verification
+
+1. Run `git status` and review modified/untracked files.
+2. Stage only files relevant to the requested change.
+3. Never commit `.env`, service-account JSON, private keys, or accidental secrets.
+4. Preserve unrelated local changes; do not stage or overwrite them.
+5. Do not force-add ignored credential files.
+
+## STEP 3 – Build
+
+1. Inspect `package.json` for the correct build script.
+2. For web/Firebase Hosting, use `npm run build:web` (`expo export --platform web`).
+3. Fix only errors introduced by the current requested changes.
+4. Stop immediately if the build fails.
+
+## STEP 4 – Local Git commit
+
+1. Stage only relevant project files.
+2. Create a meaningful commit message.
+3. Verify the commit succeeded and capture the commit hash.
+4. Never amend pushed commits unless the user explicitly requests it and safety checks pass.
+
+## STEP 5 – GitHub push
+
+1. Push to `origin main` only after a successful local commit.
+2. Verify push succeeded.
+3. Never force push.
+4. Never reset or rewrite remote history.
+
+## STEP 6 – Firebase Preview deployment (default)
+
+After a successful push (or when deploy is requested without production wording):
+
+```bash
+firebase hosting:channel:deploy testing --expires 7d --project <FIREBASE_PROJECT_ID_FROM_.firebaserc>
+```
+
+1. Use the verified project ID explicitly.
+2. Deploy Hosting only.
+3. Display the generated Preview URL.
+4. Verify deployment success.
+5. Never deploy to Production in this step.
+6. Remember Preview still can talk to production Firestore — do not perform test writes against live data.
+
+## PRODUCTION SAFETY — NEVER automatically
+
+- Delete Firestore documents
+- Reset Firebase Authentication users
+- Modify production database records
+- Run database migrations
+- Change Firebase project configuration
+- Deploy Functions or Firestore rules unless explicitly requested
+- Execute destructive commands
+- Deploy Hosting production
+
+## Production deployment — only for `DEPLOY TO PRODUCTION`
+
+1. Re-verify Firebase project ID and Hosting target.
+2. Re-verify successful build.
+3. Show the exact production command, for example:
+   `firebase deploy --only hosting --project <FIREBASE_PROJECT_ID_FROM_.firebaserc>`
+4. Ask for explicit confirmation.
+5. Deploy Hosting only after confirmation.
+
+## Failure handling
+
+If any step fails:
+- Stop immediately
+- Do not continue to later stages
+- Report the failed command and reason
+- Preserve all local changes
+- Never automatically retry destructive operations
+
+## Final report (always)
+
+Report:
+- Local commit hash
+- GitHub branch and push status
+- Firebase project ID
+- Preview URL (or production URL if approved)
+- Build status
+- Deployment status
+- Any warnings or errors
