@@ -339,15 +339,9 @@ async function ensureAdminUsersExist(): Promise<void> {
   await batch.commit();
 }
 
+/** Clinics are created only by admins in the app — never auto-seed defaults. */
 async function ensureClinicsSeeded(): Promise<void> {
-  const snapshot = await getDocs(clinicsCollection());
-  if (snapshot.empty) {
-    const batch = writeBatch(getFirestoreDb());
-    MOCK_CLINICS.forEach((clinic) => {
-      batch.set(doc(clinicsCollection(), clinic.id), clinic);
-    });
-    await batch.commit();
-  }
+  return;
 }
 
 function nextClinicId(clinics: Clinic[]): string {

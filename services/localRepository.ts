@@ -9,7 +9,6 @@ import {
   getInitialAttendance,
   getInitialShifts,
 } from '@/data/mockData';
-import { MOCK_CLINICS } from '@/data/mockClinics';
 import { RETIRED_CLINIC_IDS } from '@/utils/clinicScope';
 import { getItem, setItem } from '@/services/storage';
 import { sanitizeEmployeeAvatar } from '@/components/ui/EmployeeAvatar';
@@ -67,7 +66,7 @@ async function ensureLocalSeed(): Promise<void> {
   await setItem(LOCAL_KEYS.SALARY_SLIPS, MOCK_SALARY);
   await setItem(LOCAL_KEYS.PERFORMANCE_REVIEWS, []);
   await setItem(LOCAL_KEYS.SHIFT_ASSIGNMENTS, getInitialShifts());
-  await setItem(LOCAL_KEYS.CLINICS, MOCK_CLINICS);
+  await setItem(LOCAL_KEYS.CLINICS, []);
   await setItem(LOCAL_KEYS.META, {
     seeded: true,
     seedVersion: FIRESTORE_SEED_VERSION,

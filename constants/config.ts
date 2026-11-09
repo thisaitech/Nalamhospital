@@ -56,20 +56,6 @@ export const DEFAULT_SHIFT_CHANGE_TIMINGS = {
 
 export const INITIAL_USERS: AppUser[] = [
   {
-    email: 'dr.smith@clinic.com',
-    password: 'password123',
-    role: 'employee',
-    employeeId: 'EMP001',
-    name: 'Dr. Sarah Smith',
-  },
-  {
-    email: 'nurse.patel@clinic.com',
-    password: 'password123',
-    role: 'employee',
-    employeeId: 'EMP002',
-    name: 'Priya Patel',
-  },
-  {
     email: 'prasath14smile@gmail.com',
     password: 'Nalam@2020',
     role: 'admin',
@@ -96,7 +82,7 @@ export const LEAVE_TYPE_LABELS: Record<string, string> = {
 export const COMPENSATORY_MIN_SEGMENT_HOURS = 1;
 
 export const DEMO_LOGINS: Record<UserRole, { email: string; password: string }> = {
-  employee: { email: 'dr.smith@clinic.com', password: 'password123' },
+  employee: { email: '', password: '' },
   admin: { email: 'prasath14smile@gmail.com', password: 'Nalam@2020' },
 };
 
